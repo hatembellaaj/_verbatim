@@ -123,6 +123,57 @@ def run():
                 st.success(f"Sous-thème **{new_sub}** ajouté à **{theme_choice}** ✅")
                 st.rerun()
 
+    # Modifier un thème existant
+    with st.expander("✏️ Renommer un thème existant"):
+        if themes:
+            theme_to_edit = st.selectbox("Thème à renommer", [t["theme"] for t in themes], key="theme_to_edit")
+            new_theme_name = st.text_input("Nouveau nom du thème", value=theme_to_edit)
+            if st.button("Mettre à jour le thème"):
+                if new_theme_name.strip():
+                    for t in themes:
+                        if t["theme"] == theme_to_edit:
+                            t["theme"] = new_theme_name.strip()
+                            break
+                    st.session_state["themes_extraits"] = themes
+                    st.success(f"Thème renommé en **{new_theme_name}** ✅")
+                    st.rerun()
+        else:
+            st.info("Aucun thème à modifier.")
+
+    # Modifier un sous-thème ou ses mots-clés
+    with st.expander("🛠️ Modifier un sous-thème ou ses mots-clés"):
+        if themes and any(t.get("subthemes") for t in themes):
+            parent_theme = st.selectbox("Thème contenant le sous-thème", [t["theme"] for t in themes])
+            subthemes = next((t.get("subthemes", []) for t in themes if t["theme"] == parent_theme), [])
+            if subthemes:
+                labels = [s.get("label") if isinstance(s, dict) else str(s) for s in subthemes]
+                sub_to_edit = st.selectbox("Sous-thème à modifier", labels)
+                current = next((s for s in subthemes if (s.get("label") if isinstance(s, dict) else str(s)) == sub_to_edit), None)
+                current_keywords = ", ".join(current.get("keywords", [])) if isinstance(current, dict) else ""
+                new_label = st.text_input("Nouveau nom du sous-thème", value=sub_to_edit)
+                new_keywords_value = st.text_area("Mots-clés (séparés par des virgules)", value=current_keywords)
+                if st.button("Mettre à jour le sous-thème"):
+                    if new_label.strip():
+                        updated_keywords = [kw.strip() for kw in new_keywords_value.split(",") if kw.strip()]
+                        for t in themes:
+                            if t["theme"] == parent_theme:
+                                updated_subthemes = []
+                                for s in t.get("subthemes", []):
+                                    label = s.get("label") if isinstance(s, dict) else str(s)
+                                    if label == sub_to_edit:
+                                        updated_subthemes.append({"label": new_label.strip(), "keywords": updated_keywords})
+                                    else:
+                                        updated_subthemes.append(s)
+                                t["subthemes"] = updated_subthemes
+                                break
+                        st.session_state["themes_extraits"] = themes
+                        st.success(f"Sous-thème mis à jour : **{new_label}** ✅")
+                        st.rerun()
+            else:
+                st.info("Aucun sous-thème pour ce thème.")
+        else:
+            st.info("Aucun sous-thème à modifier.")
+
     # --- Arborescence interactive ---
     st.divider()
     st.markdown("### 🌳 Arborescence des clusters détectés / définis")
