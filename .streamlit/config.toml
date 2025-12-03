@@ -1,0 +1,12 @@
+[server]
+runOnSave = false
+maxUploadSize = 200
+maxMessageSize = 200
+enableCORS = false
+enableXsrfProtection = false
+
+[logger]
+level = "error"
+
+[browser]
+gatherUsageStats = false

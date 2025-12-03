@@ -1,0 +1,17 @@
+# Environment files
+.env
+.env.*
+
+# Log files
+*.log
+logs/
+log/
+
+# (Optional) common Python stuff you might want to ignore
+__pycache__/
+*.py[cod]
+*.sqlite3
+.venv/
+venv/
+.envrc
+

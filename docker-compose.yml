@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  clustering:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    container_name: clustering_app
+    expose:
+      - "8501"
+    environment:
+      - VIRTUAL_HOST=clustering.dorialab.net
+      - VIRTUAL_PORT=8501
+      - LETSENCRYPT_HOST=clustering.dorialab.net
+      - LETSENCRYPT_EMAIL=bellaaj@yahoo.fr
+      - STREAMLIT_SERVER_MAX_MESSAGE_SIZE=200
+    networks:
+      - app-network
+    volumes:
+      - ./data:/app/data
+      - ./nginx-clustering.conf:/etc/nginx/conf.d/client_max_body_size.conf:ro
+
+networks:
+  app-network:
+    external: true
+    name: studyassur_app-network
+
