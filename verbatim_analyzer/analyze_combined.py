@@ -7,8 +7,6 @@ from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from streamlit_tree_select import tree_select
-import streamlit_antd_components as sac
-from streamlit_tree_select import tree_select
 
 def run():
     st.title("🧩 Analyse complète des verbatims")
@@ -95,32 +93,6 @@ def run():
         st.success(f"✅ {len(themes)} thèmes chargés manuellement")
 
 
-    # --- Arborescence visuelle ---
-    st.markdown("### 🌳 Arborescence des clusters détectés / définis")
-
-    # Affichage lisible et hiérarchique
-    for t in themes:
-        st.markdown(f"**🟢 {t['theme']}**")
-        for s in t.get("subthemes", []):
-            label = s.get("label") if isinstance(s, dict) else s
-            st.markdown(f"&nbsp;&nbsp;&nbsp;• {label}")
-
-    # --- Sélection interactive + Validation ---
-    st.markdown("### ✅ Sélection de clusters à analyser")
-
-    cluster_options = [t["theme"] for t in themes] + [
-        f"{t['theme']}::{s['label'] if isinstance(s, dict) else s}"
-        for t in themes for s in t.get("subthemes", [])
-    ]
-
-    selected_clusters = st.multiselect("Choisissez un ou plusieurs clusters :", cluster_options)
-
-    if selected_clusters:
-        st.session_state["selected_clusters"] = selected_clusters
-        st.success(f"📂 Sélection actuelle : {', '.join(selected_clusters)}")
-    else:
-        st.info("🟡 Aucun cluster sélectionné pour le moment.")
-
     # --- Modification / Ajout de clusters ---
     st.divider()
     st.markdown("### ✏️ Modification / Ajout de clusters")
@@ -139,19 +111,17 @@ def run():
     with st.expander("➕ Ajouter un sous-thème à un thème existant"):
         theme_choice = st.selectbox("Sélectionnez le thème parent", [t["theme"] for t in themes])
         new_sub = st.text_input("Nom du nouveau sous-thème")
+        new_keywords = st.text_input("Mots-clés associés (séparés par une virgule)")
         if st.button("Ajouter le sous-thème"):
             if new_sub:
+                keywords_list = [kw.strip() for kw in new_keywords.split(",") if kw.strip()]
                 for t in themes:
                     if t["theme"] == theme_choice:
-                        t.setdefault("subthemes", []).append({"label": new_sub, "keywords": []})
+                        t.setdefault("subthemes", []).append({"label": new_sub, "keywords": keywords_list})
                         break
                 st.session_state["themes_extraits"] = themes
                 st.success(f"Sous-thème **{new_sub}** ajouté à **{theme_choice}** ✅")
                 st.rerun()
-
-    # Aperçu du JSON final
-    with st.expander("📜 JSON final des thèmes"):
-        st.json(themes)
 
     # --- Arborescence interactive ---
     st.divider()
@@ -163,7 +133,12 @@ def run():
             children = []
             for s in t.get("subthemes", []):
                 label = s.get("label") if isinstance(s, dict) else s
-                children.append({"label": label, "value": f"{t['theme']}::{label}"})
+                keywords = s.get("keywords", []) if isinstance(s, dict) else []
+                keyword_hint = f" — mots-clés: {', '.join(keywords)}" if keywords else ""
+                children.append({
+                    "label": f"{label}{keyword_hint}",
+                    "value": f"{t['theme']}::{label}"
+                })
             data.append({
                 "label": t.get("theme", "Thème sans nom"),
                 "value": t.get("theme", "Thème sans nom"),
@@ -175,7 +150,7 @@ def run():
 
     selected_nodes = tree_select(
         tree_data,
-        "Sélectionnez un ou plusieurs clusters",
+        "Sélectionnez les thèmes et sous-thèmes à retenir",
         key="cluster_tree"
     )
 
@@ -184,6 +159,32 @@ def run():
         st.success(f"📂 Clusters validés : {', '.join(st.session_state['selected_clusters'])}")
     else:
         st.info("🟡 Aucun cluster validé dans l’arbre.")
+
+    def filtrer_themes(themes, selection):
+        selection_set = set(selection or [])
+        filtres = []
+        for t in themes:
+            theme_name = t.get("theme", "")
+            subthemes = []
+            for s in t.get("subthemes", []):
+                label = s.get("label") if isinstance(s, dict) else s
+                value = f"{theme_name}::{label}" if label else theme_name
+                if value in selection_set:
+                    subthemes.append(s)
+            if theme_name in selection_set:
+                filtres.append(t)
+            elif subthemes:
+                filtres.append({"theme": theme_name, "subthemes": subthemes})
+        return filtres
+
+    themes_selectionnes = filtrer_themes(themes, st.session_state.get("selected_clusters", []))
+
+    # Aperçu du JSON final réellement utilisé
+    with st.expander("📜 JSON final des thèmes sélectionnés"):
+        if themes_selectionnes:
+            st.json(themes_selectionnes)
+        else:
+            st.info("Aucun cluster sélectionné pour le moment.")
 
     # 🚦 Blocage tant que rien n’est sélectionné
     if "selected_clusters" not in st.session_state or not st.session_state["selected_clusters"]:
@@ -227,10 +228,14 @@ def run():
     # Choix du modèle selon l’option
     model_name = "all-MiniLM-L6-v2" if model_choice == "MiniLM" else "bert-base-nli-mean-tokens"
 
+    # Utiliser uniquement les clusters validés pour la suite
+    themes_utilises = themes_selectionnes if themes_selectionnes else themes
+    st.session_state["themes_valides"] = themes_utilises
+
     # Association des sous-thèmes
     df_enriched = associer_sous_themes_par_similarity(
         df,
-        themes=themes,
+        themes=themes_utilises,
         text_col="Verbatim complet",
         model_name=model_name,
         seuil_similarite=seuil_similarite
