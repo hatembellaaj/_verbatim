@@ -58,6 +58,26 @@ def add_user(username: str, password: str, role: str) -> tuple[bool, str]:
     return True, f"Utilisateur {username} ajouté."
 
 
+def change_password(username: str, current_password: str, new_password: str) -> tuple[bool, str]:
+    """Update the password for a user after validating the current one."""
+
+    if not new_password:
+        return False, "Le nouveau mot de passe est requis."
+
+    users = load_users()
+    stored_user = users.get(username)
+
+    if not stored_user:
+        return False, "Utilisateur introuvable."
+
+    if stored_user.get("password") != _hash_password(current_password):
+        return False, "Le mot de passe actuel est incorrect."
+
+    users[username]["password"] = _hash_password(new_password)
+    save_users(users)
+    return True, "Mot de passe mis à jour avec succès."
+
+
 def require_authentication() -> Dict[str, str]:
     """Render a login form if necessary and return the authenticated user."""
     _bootstrap_default_admin()
@@ -85,6 +105,24 @@ def require_authentication() -> Dict[str, str]:
 
 def render_user_badge(user: Dict[str, str]) -> None:
     st.sidebar.success(f"Connecté en tant que {user['username']} ({user['role']})")
+
+    with st.sidebar.expander("🔑 Modifier mon mot de passe"):
+        with st.form("change_password_form"):
+            current_password = st.text_input("Mot de passe actuel", type="password")
+            new_password = st.text_input("Nouveau mot de passe", type="password")
+            confirm_password = st.text_input("Confirmer le nouveau mot de passe", type="password")
+            submitted = st.form_submit_button("Mettre à jour")
+
+        if submitted:
+            if new_password != confirm_password:
+                st.sidebar.error("Les nouveaux mots de passe ne correspondent pas.")
+            else:
+                ok, message = change_password(user["username"], current_password, new_password)
+                if ok:
+                    st.sidebar.success(message)
+                else:
+                    st.sidebar.error(message)
+
     if st.sidebar.button("Se déconnecter"):
         st.session_state.pop("auth_user", None)
         st.rerun()
