@@ -11,7 +11,8 @@ user = auth.require_authentication()
 auth.render_user_badge(user)
 auth.render_user_management(user)
 
-menu = st.sidebar.selectbox("Navigation", ["Marketing", "IA Rating", "Analyse combinée"])
+menu_options = ["Marketing", "IA Rating", "Analyse combinée"]
+menu = st.sidebar.selectbox("Navigation", menu_options, index=menu_options.index("Analyse combinée"))
 
 if menu == "Marketing":
     marketing.run()
