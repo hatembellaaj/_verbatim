@@ -41,7 +41,19 @@ def generer_rapport_openai(stats_df: pd.DataFrame) -> str:
         return ""
 
     try:
-        resume = stats_df.reset_index()[["Sous-thème", "mean", "Polarité estimée", "Véracité polarité"]].to_string(index=False)
+        df_reset = stats_df.reset_index()
+
+        if "Sous-thème" not in df_reset.columns and df_reset.columns.size > 0:
+            df_reset = df_reset.rename(columns={df_reset.columns[0]: "Sous-thème"})
+
+        preferred_cols = ["Sous-thème", "mean", "Polarité estimée", "Véracité polarité"]
+        selected_cols = [col for col in preferred_cols if col in df_reset.columns]
+
+        if len(selected_cols) < 2:
+            remaining = [c for c in df_reset.columns if c not in ["Sous-thème"]]
+            selected_cols = ["Sous-thème"] + remaining[:3]
+
+        resume = df_reset[selected_cols].to_string(index=False)
 
         prompt = f"""
 Tu es un expert en marketing et en analyse de l'expérience client.
