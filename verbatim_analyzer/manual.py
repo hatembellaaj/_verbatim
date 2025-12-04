@@ -56,6 +56,25 @@ def render_manual() -> None:
         """
     )
 
+    st.subheader("📖 Référentiel des paramètres clés")
+    st.markdown(
+        """
+        - **Modèle d'encodage** : algorithme utilisé pour transformer chaque verbatim en vecteur
+          numérique. Le modèle choisi influe sur la finesse de la détection des similarités et des
+          thèmes.
+        - **MiniLM** : modèle léger et rapide, recommandé pour les jeux de données volumineux ou
+          pour des analyses exploratoires. Il fournit de bonnes performances tout en conservant un
+          temps de calcul réduit.
+        - **BERT** : modèle plus lourd mais plus précis, adapté lorsque la qualité de
+          l'encodage prime sur la vitesse. À privilégier pour des analyses finales ou des verbatims
+          contenant des nuances linguistiques complexes.
+        - **Seuil de similarité (MiniLM/BERT)** : valeur entre 0 et 1 qui fixe le niveau minimal de
+          proximité entre deux verbatims pour qu'ils soient regroupés dans un même cluster. Un seuil
+          élevé (proche de 1) produit des clusters plus stricts et spécifiques, tandis qu'un seuil
+          plus faible crée des regroupements plus larges et tolérants.
+        """
+    )
+
     st.header("4. Export et rapports")
     st.markdown(
         """
