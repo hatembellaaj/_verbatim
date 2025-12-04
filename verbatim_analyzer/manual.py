@@ -37,6 +37,11 @@ def render_manual() -> None:
     st.markdown(
         """
         - **Importer un fichier CSV** depuis l'étape 1 ; la colonne « Verbatim public » est requise.
+        - **Colonnes attendues** :
+          - « Verbatim public » (obligatoire) pour le texte principal analysé.
+          - « Verbatim privé » (optionnelle) pour un complément qui sera concaténé automatiquement au verbatim public.
+          - « Note globale avis 1 » (obligatoire uniquement en mode Marketing) pour les statistiques liées à la note client.
+          - Les colonnes calculées par l'application (**Verbatim complet**, **Note IA**, incohérences détectées) sont générées automatiquement : vous n'avez rien à ajouter dans votre CSV pour ces champs.
         - **Choisir le mode d'analyse** :
           - *Analyse Marketing* pour travailler sur la note client.
           - *Analyse IA* pour utiliser une note générée automatiquement.
@@ -64,6 +69,10 @@ def render_manual() -> None:
     st.header("5. Gestion des incohérences")
     st.markdown(
         """
+        - Activez l'option **« Afficher incohérences sémantiques »** (ou le toggle « Activer la
+          détection des incohérences » dans l'analyse combinée) pour déclencher automatiquement la
+          vérification via `utils.verifier_coherence_semantique`. L'utilisateur n'a pas d'action
+          manuelle à réaliser en dehors de cette option.
         - Surveillez les alertes lors de l'import : colonnes manquantes, types inattendus ou
           encodage erroné sont souvent la source d'incohérences. Corrigez le fichier puis
           réimportez-le.
