@@ -61,7 +61,25 @@ def render_manual() -> None:
         """
     )
 
-    st.header("5. Conseils pratiques")
+    st.header("5. Gestion des incohérences")
+    st.markdown(
+        """
+        - Surveillez les alertes lors de l'import : colonnes manquantes, types inattendus ou
+          encodage erroné sont souvent la source d'incohérences. Corrigez le fichier puis
+          réimportez-le.
+        - Comparez les notes Marketing et IA lorsque les deux sont disponibles. Une divergence
+          significative signale un jeu de données à nettoyer ou un paramétrage de scoring à revoir.
+        - En cas de clusters surprenants, supprimez les doublons, harmonisez la casse et les
+          accents, puis relancez l'extraction automatique ou ajustez vos thèmes manuels avant de
+          poursuivre l'analyse.
+        - Lorsque vous exportez un rapport, consignez les incohérences observées (lignes supprimées,
+          colonnes corrigées, règles d'exclusion) pour garder un historique clair des corrections.
+        - Si une incohérence persiste, recommencez avec un sous-échantillon de verbatims pour
+          identifier la ligne ou la colonne problématique, puis réexécutez l'analyse complète.
+        """
+    )
+
+    st.header("6. Conseils pratiques")
     st.markdown(
         """
         - Limitez la taille des fichiers CSV pour accélérer le chargement et l'affichage des
