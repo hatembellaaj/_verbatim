@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import utils
-from column_mapper import render_column_mapper
+from column_mapper import load_csv_with_mapping
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
@@ -24,19 +24,14 @@ def run():
         st.info("En attente d’un fichier CSV…")
         st.stop()
 
-    try:
-        df = pd.read_csv(uploaded_file)
-        st.success(f"✅ {len(df)} lignes chargées")
-    except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier : {e}")
-        st.stop()
-
-    df, _ = render_column_mapper(
-        df,
+    df = load_csv_with_mapping(
+        uploaded_file,
         required_fields=["Verbatim public"],
         optional_fields=["Verbatim privé", "Note globale avis 1"],
         key_prefix="combined",
     )
+
+    st.success(f"✅ {len(df)} lignes chargées après mapping des colonnes")
 
     if "Verbatim public" not in df.columns:
         st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
