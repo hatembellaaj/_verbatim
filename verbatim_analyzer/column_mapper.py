@@ -75,3 +75,55 @@ def render_column_mapper(
         st.stop()
 
     return renamed_df, mapping
+
+
+def load_csv_with_mapping(
+    uploaded_file,
+    required_fields: List[str],
+    optional_fields: Optional[List[str]] = None,
+    key_prefix: str = "colmap",
+    sample_rows: int = 200,
+) -> pd.DataFrame:
+    """Charge un CSV en deux temps pour fiabiliser le mapping des colonnes.
+
+    1) Lecture d'un échantillon pour détecter le séparateur et proposer le mapping.
+    2) Relecture complète en ne conservant que les colonnes mappées (usecols).
+    """
+
+    try:
+        uploaded_file.seek(0)
+        preview = pd.read_csv(
+            uploaded_file,
+            sep=None,
+            engine="python",
+            nrows=sample_rows,
+            on_bad_lines="skip",
+        )
+    except Exception as e:
+        st.error(f"Erreur lors de la lecture d'un échantillon du fichier : {e}")
+        st.stop()
+
+    preview, mapping = render_column_mapper(
+        preview,
+        required_fields=required_fields,
+        optional_fields=optional_fields,
+        key_prefix=key_prefix,
+    )
+
+    usecols = list(mapping.values())
+
+    try:
+        uploaded_file.seek(0)
+        df = pd.read_csv(
+            uploaded_file,
+            sep=None,
+            engine="python",
+            usecols=usecols,
+            on_bad_lines="skip",
+        )
+    except Exception as e:
+        st.error(f"Erreur lors de la lecture du fichier complet après mapping : {e}")
+        st.stop()
+
+    renamed_df = df.rename(columns={value: key for key, value in mapping.items()})
+    return renamed_df

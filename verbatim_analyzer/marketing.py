@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import utils
-from column_mapper import render_column_mapper
+from column_mapper import load_csv_with_mapping
 from verbatim_analyzer.database import init_db
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from sidebar_options import get_sidebar_options
@@ -20,19 +20,14 @@ def run():
     if uploaded_file is None:
         st.stop()
 
-    try:
-        df = pd.read_csv(uploaded_file)
-        st.success(f"✅ Fichier chargé : {df.shape[0]} lignes")
-    except Exception as e:
-        st.error(f"Erreur de lecture : {e}")
-        st.stop()
-
-    df, _ = render_column_mapper(
-        df,
+    df = load_csv_with_mapping(
+        uploaded_file,
         required_fields=["Verbatim public", "Note globale avis 1"],
         optional_fields=["Verbatim privé"],
         key_prefix="marketing",
     )
+
+    st.success(f"✅ Fichier chargé après mapping : {df.shape[0]} lignes")
 
     missing_required = [col for col in ["Verbatim public", "Note globale avis 1"] if col not in df.columns]
     if missing_required:
