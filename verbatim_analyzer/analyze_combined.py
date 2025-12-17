@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import utils
+from column_mapper import render_column_mapper
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
@@ -30,9 +31,15 @@ def run():
         st.error(f"Erreur lors de la lecture du fichier : {e}")
         st.stop()
 
-    # Validation colonnes
+    df, _ = render_column_mapper(
+        df,
+        required_fields=["Verbatim public"],
+        optional_fields=["Verbatim privé", "Note globale avis 1"],
+        key_prefix="combined",
+    )
+
     if "Verbatim public" not in df.columns:
-        st.error("❌ Le fichier doit contenir la colonne 'Verbatim public'.")
+        st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
         st.stop()
 
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")

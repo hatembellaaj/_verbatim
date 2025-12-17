@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import utils
+from column_mapper import render_column_mapper
 from verbatim_analyzer.database import init_db
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from sidebar_options import get_sidebar_options
@@ -26,9 +27,20 @@ def run():
         st.error(f"Erreur de lecture : {e}")
         st.stop()
 
-    required_cols = ["Verbatim public", "Note globale avis 1"]
-    if not all(c in df.columns for c in required_cols):
-        st.error("❌ Le fichier doit contenir au moins 'Verbatim public' et 'Note globale avis 1'.")
+    df, _ = render_column_mapper(
+        df,
+        required_fields=["Verbatim public", "Note globale avis 1"],
+        optional_fields=["Verbatim privé"],
+        key_prefix="marketing",
+    )
+
+    missing_required = [col for col in ["Verbatim public", "Note globale avis 1"] if col not in df.columns]
+    if missing_required:
+        st.error(
+            "❌ Mapping incomplet : "
+            + ", ".join(missing_required)
+            + " est requis pour poursuivre."
+        )
         st.stop()
 
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")

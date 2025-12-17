@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 import plotly.express as px 
 import utils
+from column_mapper import render_column_mapper
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
 
@@ -21,8 +22,15 @@ def run():
         st.error(f"Erreur de lecture : {e}")
         st.stop()
 
+    df, _ = render_column_mapper(
+        df,
+        required_fields=["Verbatim public"],
+        optional_fields=["Verbatim privé"],
+        key_prefix="ia_rating",
+    )
+
     if "Verbatim public" not in df.columns:
-        st.error("❌ Le fichier doit contenir une colonne 'Verbatim public'.")
+        st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
         st.stop()
 
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")
