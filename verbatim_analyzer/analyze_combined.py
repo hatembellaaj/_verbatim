@@ -8,6 +8,7 @@ from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from streamlit_tree_select import tree_select
+from verbatim_analyzer.pricing import render_llm_selector
 
 def run():
     st.title("🧩 Analyse complète des verbatims")
@@ -48,6 +49,17 @@ def run():
     )
 
     options = get_sidebar_options(uploaded_file)
+    if options.get("use_openai"):
+        st.sidebar.info(
+            f"LLM sélectionné : **{options['llm_model']}**\n\n"
+            f"Coût estimé : ${options['llm_input_cost']:.4f} /1k in · ${options['llm_output_cost']:.4f} /1k out"
+        )
+
+    with st.expander("⚙️ Choix du LLM & coûts OpenAI", expanded=options.get("use_openai", False)):
+        chosen_model, in_cost, out_cost = render_llm_selector("OpenAI")
+        options["llm_model"] = chosen_model
+        options["llm_input_cost"] = in_cost
+        options["llm_output_cost"] = out_cost
 
     # === Étape 3 : Paramétrage & Extraction des thèmes ===
     if st.button("🔄 Ré-extraire les clusters via OpenAI"):
@@ -75,7 +87,12 @@ def run():
             try:
                 texts_public = df["Verbatim public"].astype(str).tolist()
                 texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
-                themes = extract_marketing_clusters_with_openai(texts_public, texts_private, nb_clusters)
+                themes = extract_marketing_clusters_with_openai(
+                    texts_public,
+                    texts_private,
+                    nb_clusters,
+                    model_name=options["llm_model"],
+                )
                 st.session_state["themes_extraits"] = themes
                 st.success("✅ Clusters extraits automatiquement")
                 st.rerun()
