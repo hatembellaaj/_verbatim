@@ -169,7 +169,7 @@ def analyser_sentiment_mixte(texte):
         return {"label": "Erreur", "score": 0, "source": str(e)}
 
 
-def verifier_polarite_openai(sous_theme: str, polarite_estimee: str, note_moyenne: float) -> str:
+def verifier_polarite_openai(sous_theme: str, polarite_estimee: str, note_moyenne: float, model: str | None = None) -> str:
     prompt = f"""
     Voici un sous-thème client : "{sous_theme}"
     Polarité détectée automatiquement : {polarite_estimee}
@@ -178,8 +178,17 @@ def verifier_polarite_openai(sous_theme: str, polarite_estimee: str, note_moyenn
     Réponds uniquement par un mot : Positive, Negative ou Neutre.
     """
     try:
+        chosen_model = model
+        if chosen_model is None:
+            try:
+                import streamlit as st  # lazy import pour récupérer le choix utilisateur si dispo
+                chosen_model = st.session_state.get("llm_model")
+            except Exception:
+                chosen_model = None
+
+        chosen_model = chosen_model or "gpt-4o-mini"
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=chosen_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
@@ -437,5 +446,4 @@ def calculer_note_ia(verbatim: str) -> int:
     except Exception as e:
         logging.error(f"Erreur calcul note IA: {e}")
         return 3  # neutre fallback
-
 

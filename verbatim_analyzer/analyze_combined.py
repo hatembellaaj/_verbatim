@@ -48,6 +48,11 @@ def run():
     )
 
     options = get_sidebar_options(uploaded_file)
+    if options.get("use_openai"):
+        st.sidebar.info(
+            f"LLM sélectionné : **{options['llm_model']}**\n\n"
+            f"Coût estimé : ${options['llm_input_cost']:.4f} /1k in · ${options['llm_output_cost']:.4f} /1k out"
+        )
 
     # === Étape 3 : Paramétrage & Extraction des thèmes ===
     if st.button("🔄 Ré-extraire les clusters via OpenAI"):
@@ -75,7 +80,12 @@ def run():
             try:
                 texts_public = df["Verbatim public"].astype(str).tolist()
                 texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
-                themes = extract_marketing_clusters_with_openai(texts_public, texts_private, nb_clusters)
+                themes = extract_marketing_clusters_with_openai(
+                    texts_public,
+                    texts_private,
+                    nb_clusters,
+                    model_name=options["llm_model"],
+                )
                 st.session_state["themes_extraits"] = themes
                 st.success("✅ Clusters extraits automatiquement")
                 st.rerun()
