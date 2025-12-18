@@ -6,6 +6,7 @@ import utils
 from column_mapper import render_column_mapper
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
+from verbatim_analyzer.pricing import estimate_average_chars
 
 
 def run():
@@ -35,8 +36,15 @@ def run():
 
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")
 
+    verbatims_full = df["Verbatim complet"].fillna("").astype(str)
+    avg_chars_per_verbatim = estimate_average_chars(verbatims_full.tolist())
+
     # === Options sidebar ===
-    options = get_sidebar_options(uploaded_file)
+    options = get_sidebar_options(
+        uploaded_file,
+        verbatim_count=len(df),
+        avg_chars_per_verbatim=avg_chars_per_verbatim,
+    )
 
     # === Étape 1 : Calcul note IA ===
     st.subheader("🧠 Génération de la note IA (1–5)")

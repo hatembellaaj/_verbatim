@@ -1,8 +1,14 @@
 import streamlit as st
 
-from verbatim_analyzer.pricing import format_cost, get_model_cost, load_pricing
+from verbatim_analyzer.pricing import (
+    estimate_input_cost,
+    estimate_sampling_tokens,
+    format_cost,
+    get_model_cost,
+    load_pricing,
+)
 
-def get_sidebar_options(uploaded_file=None):
+def get_sidebar_options(uploaded_file=None, verbatim_count: int | None = None, avg_chars_per_verbatim: int | None = None):
     """Construit la sidebar et retourne un dictionnaire d'options."""
     st.sidebar.markdown("### ⚙️ Options d'affichage")
 
@@ -48,14 +54,40 @@ def get_sidebar_options(uploaded_file=None):
         "Mettre à jour via l'API de pricing ou saisie manuelle."
     )
 
+    use_openai = st.sidebar.checkbox("Utiliser OpenAI pour les clusters")
+    max_sample = max(1, verbatim_count or 50)
+    default_sample = min(50, max_sample)
+    sample_size = st.sidebar.slider(
+        "Verbatims envoyés à OpenAI (échantillon aléatoire)",
+        min_value=1,
+        max_value=max_sample,
+        value=default_sample,
+        disabled=not use_openai,
+        help="Nombre de verbatims tirés aléatoirement dans votre fichier pour définir les clusters.",
+    )
+
+    tokens_per_verbatim, total_tokens = estimate_sampling_tokens(sample_size, avg_chars_per_verbatim or 0)
+    estimated_cost = estimate_input_cost(total_tokens, input_cost)
+
+    st.sidebar.caption(
+        f"Méthode : moyenne observée ≈ {avg_chars_per_verbatim or 0} caractères/verbatim "
+        f"(~{tokens_per_verbatim:.0f} tokens). Échantillon aléatoire de {sample_size} verbatims "
+        f"⇒ ~{total_tokens:.0f} tokens en entrée. Coût estimé = tokens_totaux/1000 × coût entrée."
+    )
+    st.sidebar.info(f"Coût moyen estimé pour l'extraction : ${estimated_cost:.4f}")
+
     options.update({
-        "use_openai":       st.sidebar.checkbox("Utiliser OpenAI pour les clusters"),
+        "use_openai":       use_openai,
         "nb_clusters":      st.sidebar.slider("Nombre de clusters", min_value=2, max_value=1000, value=5),
         "model_choice":     st.sidebar.radio("Modèle d'encodage", ["MiniLM", "BERT"]),
         "seuil_similarite": st.sidebar.slider("Seuil de similarité (MiniLM/BERT)", 0.0, 1.0, 0.45, step=0.05),
         "llm_model":        llm_model,
         "llm_input_cost":   input_cost,
         "llm_output_cost":  output_cost,
+        "cluster_sample_size": sample_size,
+        "avg_chars_per_verbatim": avg_chars_per_verbatim or 0,
+        "estimated_openai_tokens": total_tokens,
+        "estimated_openai_cost": estimated_cost,
     })
 
     st.session_state["llm_model"] = llm_model
@@ -64,5 +96,7 @@ def get_sidebar_options(uploaded_file=None):
         "output": output_cost,
         "source": "manual" if (input_cost != (default_input_cost or 0.0) or output_cost != (default_output_cost or 0.0)) else "file",
     }
+    st.session_state["cluster_sample_size"] = sample_size
+    st.session_state["avg_chars_per_verbatim"] = avg_chars_per_verbatim or 0
 
     return options

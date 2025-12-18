@@ -8,7 +8,7 @@ from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from streamlit_tree_select import tree_select
-from verbatim_analyzer.pricing import render_llm_selector
+from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector
 
 def run():
     st.title("🧩 Analyse complète des verbatims")
@@ -40,6 +40,9 @@ def run():
 
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")
 
+    verbatims_full = df["Verbatim complet"].fillna("").astype(str)
+    avg_chars_per_verbatim = estimate_average_chars(verbatims_full.tolist())
+
     # === Étape 2 : Choix du mode d’analyse ===
     st.header("⚙️ Étape 2 : Choisissez le mode d’analyse")
     mode = st.radio(
@@ -48,7 +51,11 @@ def run():
         horizontal=True
     )
 
-    options = get_sidebar_options(uploaded_file)
+    options = get_sidebar_options(
+        uploaded_file,
+        verbatim_count=len(df),
+        avg_chars_per_verbatim=avg_chars_per_verbatim,
+    )
     if options.get("use_openai"):
         st.sidebar.info(
             f"LLM sélectionné : **{options['llm_model']}**\n\n"
@@ -92,9 +99,15 @@ def run():
                     texts_private,
                     nb_clusters,
                     model_name=options["llm_model"],
+                    sample_size=options["cluster_sample_size"],
                 )
                 st.session_state["themes_extraits"] = themes
-                st.success("✅ Clusters extraits automatiquement")
+                st.success(
+                    f"✅ Clusters extraits automatiquement (échantillon de {options['cluster_sample_size']} verbatims)"
+                )
+                st.caption(
+                    f"Moyenne observée : ~{avg_chars_per_verbatim} caractères/verbatim sur {len(df)} verbatims."
+                )
                 st.rerun()
             except Exception as e:
                 st.error(f"Erreur OpenAI : {e}")
