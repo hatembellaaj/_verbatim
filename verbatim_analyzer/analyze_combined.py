@@ -83,10 +83,12 @@ def run():
         nb_clusters = st.slider("Nombre de clusters (si OpenAI)", 3, 15, options["nb_clusters"])
 
     themes = []
+    sampled_verbatims = st.session_state.get("sampled_verbatims", [])
 
     # 🔁 Si on a déjà des thèmes extraits en mémoire, on les réutilise
     if "themes_extraits" in st.session_state:
         themes = st.session_state["themes_extraits"]
+        sampled_verbatims = st.session_state.get("sampled_verbatims", sampled_verbatims)
 
     # ⚙️ Extraction seulement si OpenAI activé ET pas déjà fait
     elif use_openai:
@@ -94,20 +96,28 @@ def run():
             try:
                 texts_public = df["Verbatim public"].astype(str).tolist()
                 texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
-                themes = extract_marketing_clusters_with_openai(
+                themes, sampled_verbatims = extract_marketing_clusters_with_openai(
                     texts_public,
                     texts_private,
                     nb_clusters,
                     model_name=options["llm_model"],
                     sample_size=options["cluster_sample_size"],
+                    return_sample=True,
                 )
                 st.session_state["themes_extraits"] = themes
+                st.session_state["sampled_verbatims"] = sampled_verbatims
                 st.success(
                     f"✅ Clusters extraits automatiquement (échantillon de {options['cluster_sample_size']} verbatims)"
                 )
                 st.caption(
                     f"Moyenne observée : ~{avg_chars_per_verbatim} caractères/verbatim sur {len(df)} verbatims."
                 )
+                with st.expander("📑 Contexte des verbatims envoyés à OpenAI", expanded=False):
+                    st.markdown(
+                        f"{len(sampled_verbatims)} verbatims tirés aléatoirement sur {len(df)} "
+                        "ont été transmis à l'API pour générer les thèmes."
+                    )
+                    st.dataframe(pd.DataFrame({"Verbatims échantillonnés": sampled_verbatims}))
                 st.rerun()
             except Exception as e:
                 st.error(f"Erreur OpenAI : {e}")
@@ -236,6 +246,14 @@ def run():
         "Sélectionnez les thèmes et sous-thèmes à retenir",
         key="cluster_tree"
     )
+
+    if sampled_verbatims:
+        with st.expander("📑 Contexte de l'échantillon OpenAI", expanded=False):
+            st.markdown(
+                f"Échantillon aléatoire : {len(sampled_verbatims)} verbatims envoyés à l'API "
+                f"sur {len(df)} disponibles."
+            )
+            st.dataframe(pd.DataFrame({"Verbatims échantillonnés": sampled_verbatims}))
 
     if selected_nodes and selected_nodes.get("checked"):
         st.session_state["selected_clusters"] = selected_nodes["checked"]
