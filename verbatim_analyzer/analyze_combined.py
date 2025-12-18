@@ -82,6 +82,26 @@ def run():
     with col2:
         nb_clusters = st.slider("Nombre de clusters (si OpenAI)", 3, 15, options["nb_clusters"])
 
+    sample_col1, sample_col2 = st.columns([2, 1])
+    with sample_col1:
+        sample_size = st.slider(
+            "Verbatims aléatoires envoyés à OpenAI",
+            min_value=1,
+            max_value=max(1, len(df)),
+            value=options["cluster_sample_size"],
+            disabled=not use_openai,
+            help="Sélectionnez combien de verbatims seront tirés aléatoirement pour générer les thèmes.",
+        )
+    with sample_col2:
+        st.metric(
+            "Coût estimé entrée",
+            f"${options['estimated_openai_cost']:.4f}",
+            help="Basé sur la longueur moyenne observée et le pricing OpenAI sélectionné",
+        )
+
+    options["cluster_sample_size"] = sample_size
+    st.session_state["cluster_sample_size"] = sample_size
+
     themes = []
     sampled_verbatims = st.session_state.get("sampled_verbatims", [])
 

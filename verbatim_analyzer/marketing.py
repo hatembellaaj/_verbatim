@@ -56,6 +56,26 @@ def run():
             f"Coût estimé : ${options['llm_input_cost']:.4f} /1k in · ${options['llm_output_cost']:.4f} /1k out"
         )
 
+    sample_col1, sample_col2 = st.columns([2, 1])
+    with sample_col1:
+        sample_size = st.slider(
+            "Verbatims aléatoires envoyés à OpenAI",
+            min_value=1,
+            max_value=max(1, len(df)),
+            value=options["cluster_sample_size"],
+            disabled=not options.get("use_openai", False),
+            help="Définissez combien de verbatims seront tirés au hasard pour extraire les thèmes Marketing.",
+        )
+    with sample_col2:
+        st.metric(
+            "Coût estimé entrée",
+            f"${options['estimated_openai_cost']:.4f}",
+            help="Basé sur la longueur moyenne observée et le pricing OpenAI sélectionné",
+        )
+
+    options["cluster_sample_size"] = sample_size
+    st.session_state["cluster_sample_size"] = sample_size
+
     with st.expander("⚙️ Choix du LLM & coûts OpenAI", expanded=options.get("use_openai", False)):
         chosen_model, in_cost, out_cost = render_llm_selector("OpenAI")
         options["llm_model"] = chosen_model
