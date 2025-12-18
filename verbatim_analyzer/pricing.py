@@ -85,6 +85,40 @@ def estimate_input_cost(total_tokens: float, input_cost_per_1k: Optional[float])
     return (total_tokens / 1000) * input_cost_per_1k
 
 
+def compute_sampling_estimates(
+    sample_size: int,
+    avg_chars_per_verbatim: int,
+    model: Optional[str] = None,
+    pricing: Optional[Dict[str, Dict[str, float]]] = None,
+    input_cost_override: Optional[float] = None,
+) -> Dict[str, float]:
+    """Return a complete view of sampling costs based on file stats and pricing.
+
+    The helper consolidates the average length calculation, token estimation and
+    OpenAI input cost using the pricing loaded for the chosen model. It is used
+    by the sidebar to provide a transparent estimation method to the user.
+    """
+
+    pricing_data = pricing or load_pricing()
+    model_input_cost = input_cost_override
+    if model_input_cost is None and model:
+        model_input_cost, _ = get_model_cost(model, pricing_data)
+
+    tokens_per_verbatim, total_tokens = estimate_sampling_tokens(
+        sample_size,
+        avg_chars_per_verbatim,
+    )
+    estimated_cost = estimate_input_cost(total_tokens, model_input_cost)
+
+    return {
+        "avg_chars_per_verbatim": avg_chars_per_verbatim,
+        "tokens_per_verbatim": tokens_per_verbatim,
+        "total_tokens": total_tokens,
+        "estimated_cost": estimated_cost,
+        "input_cost_used": model_input_cost or 0.0,
+    }
+
+
 def render_llm_selector(label_prefix: str = "OpenAI") -> tuple[str, float, float]:
     """Render LLM + pricing pickers in the main area (not only sidebar).
 

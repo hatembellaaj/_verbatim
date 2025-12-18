@@ -70,12 +70,13 @@ def run():
     if options["use_openai"]:
         with st.spinner("🔮 Extraction des clusters via OpenAI..."):
             try:
-                themes = extract_marketing_clusters_with_openai(
+                themes, sampled_verbatims = extract_marketing_clusters_with_openai(
                     texts_public,
                     texts_private,
                     options["nb_clusters"],
                     model_name=options["llm_model"],
                     sample_size=options["cluster_sample_size"],
+                    return_sample=True,
                 )
                 st.success(
                     f"✅ Clusters extraits avec succès (échantillon aléatoire de {options['cluster_sample_size']} verbatims)"
@@ -84,6 +85,12 @@ def run():
                     f"Longueur moyenne mesurée : ~{avg_chars_per_verbatim} caractères/verbatim • "
                     f"{len(df)} verbatims au total dans le fichier."
                 )
+                with st.expander("📑 Contexte de l'échantillon envoyé à OpenAI", expanded=False):
+                    st.markdown(
+                        f"{len(sampled_verbatims)} verbatims ont été tirés aléatoirement sur {len(df)} "
+                        "avant l'extraction des thèmes."
+                    )
+                    st.dataframe(pd.DataFrame({"Verbatims échantillonnés": sampled_verbatims}))
                 with st.expander("📂 Aperçu des thèmes extraits"):
                     for t in themes:
                         st.markdown(f"**{t['theme']}**")

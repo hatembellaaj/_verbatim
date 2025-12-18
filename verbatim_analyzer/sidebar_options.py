@@ -1,8 +1,7 @@
 import streamlit as st
 
 from verbatim_analyzer.pricing import (
-    estimate_input_cost,
-    estimate_sampling_tokens,
+    compute_sampling_estimates,
     format_cost,
     get_model_cost,
     load_pricing,
@@ -66,15 +65,20 @@ def get_sidebar_options(uploaded_file=None, verbatim_count: int | None = None, a
         help="Nombre de verbatims tirés aléatoirement dans votre fichier pour définir les clusters.",
     )
 
-    tokens_per_verbatim, total_tokens = estimate_sampling_tokens(sample_size, avg_chars_per_verbatim or 0)
-    estimated_cost = estimate_input_cost(total_tokens, input_cost)
+    estimates = compute_sampling_estimates(
+        sample_size,
+        avg_chars_per_verbatim or 0,
+        model=llm_model,
+        pricing=pricing,
+        input_cost_override=input_cost,
+    )
 
     st.sidebar.caption(
         f"Méthode : moyenne observée ≈ {avg_chars_per_verbatim or 0} caractères/verbatim "
-        f"(~{tokens_per_verbatim:.0f} tokens). Échantillon aléatoire de {sample_size} verbatims "
-        f"⇒ ~{total_tokens:.0f} tokens en entrée. Coût estimé = tokens_totaux/1000 × coût entrée."
+        f"(~{estimates['tokens_per_verbatim']:.0f} tokens). Échantillon aléatoire de {sample_size} verbatims "
+        f"⇒ ~{estimates['total_tokens']:.0f} tokens en entrée. Coût estimé = tokens_totaux/1000 × coût entrée."
     )
-    st.sidebar.info(f"Coût moyen estimé pour l'extraction : ${estimated_cost:.4f}")
+    st.sidebar.info(f"Coût moyen estimé pour l'extraction : ${estimates['estimated_cost']:.4f}")
 
     options.update({
         "use_openai":       use_openai,
@@ -86,8 +90,8 @@ def get_sidebar_options(uploaded_file=None, verbatim_count: int | None = None, a
         "llm_output_cost":  output_cost,
         "cluster_sample_size": sample_size,
         "avg_chars_per_verbatim": avg_chars_per_verbatim or 0,
-        "estimated_openai_tokens": total_tokens,
-        "estimated_openai_cost": estimated_cost,
+        "estimated_openai_tokens": estimates["total_tokens"],
+        "estimated_openai_cost": estimates["estimated_cost"],
     })
 
     st.session_state["llm_model"] = llm_model
