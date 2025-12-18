@@ -10,6 +10,7 @@ from verbatim_analyzer.database import init_db
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
+from verbatim_analyzer.pricing import render_llm_selector
 
 
 def run():
@@ -47,6 +48,12 @@ def run():
             f"LLM sélectionné : **{options['llm_model']}**\n\n"
             f"Coût estimé : ${options['llm_input_cost']:.4f} /1k in · ${options['llm_output_cost']:.4f} /1k out"
         )
+
+    with st.expander("⚙️ Choix du LLM & coûts OpenAI", expanded=options.get("use_openai", False)):
+        chosen_model, in_cost, out_cost = render_llm_selector("OpenAI")
+        options["llm_model"] = chosen_model
+        options["llm_input_cost"] = in_cost
+        options["llm_output_cost"] = out_cost
 
     # === Extraction des thèmes ===
     texts_public = df["Verbatim public"].astype(str).tolist()

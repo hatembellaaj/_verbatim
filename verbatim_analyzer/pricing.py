@@ -3,6 +3,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 
+import streamlit as st
+
 
 DEFAULT_PRICING_PATH = Path(__file__).resolve().parent.parent / "openai_pricing.json"
 
@@ -50,3 +52,52 @@ def format_cost(input_cost: Optional[float], output_cost: Optional[float]) -> st
     if output_cost is not None:
         parts.append(f"Sortie : ${output_cost:.4f} / 1k tokens")
     return " · ".join(parts)
+
+
+def render_llm_selector(label_prefix: str = "OpenAI") -> tuple[str, float, float]:
+    """Render LLM + pricing pickers in the main area (not only sidebar).
+
+    Returns the tuple (model, input_cost, output_cost) using pricing defaults
+    when available and falling back to stored session choices.
+    """
+
+    pricing = load_pricing()
+    model_choices = sorted(pricing.keys()) or ["gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"]
+
+    default_model = st.session_state.get("llm_model") or ("gpt-4o-mini" if "gpt-4o-mini" in model_choices else model_choices[0])
+    model = st.selectbox(
+        f"Modèle {label_prefix}",
+        model_choices,
+        index=model_choices.index(default_model) if default_model in model_choices else 0,
+        key=f"{label_prefix}_llm_model_main",
+    )
+
+    default_input, default_output = get_model_cost(model, pricing)
+    col_a, col_b = st.columns(2)
+    with col_a:
+        input_cost = st.number_input(
+            "Coût entrée / 1k tokens ($)",
+            min_value=0.0,
+            value=float(default_input or st.session_state.get("llm_pricing", {}).get("input", 0.0)),
+            format="%.6f",
+            key=f"{label_prefix}_llm_input_main",
+        )
+    with col_b:
+        output_cost = st.number_input(
+            "Coût sortie / 1k tokens ($)",
+            min_value=0.0,
+            value=float(default_output or st.session_state.get("llm_pricing", {}).get("output", 0.0)),
+            format="%.6f",
+            key=f"{label_prefix}_llm_output_main",
+        )
+
+    st.caption(format_cost(input_cost, output_cost))
+
+    st.session_state["llm_model"] = model
+    st.session_state["llm_pricing"] = {
+        "input": input_cost,
+        "output": output_cost,
+        "source": "manual-main",
+    }
+
+    return model, input_cost, output_cost
