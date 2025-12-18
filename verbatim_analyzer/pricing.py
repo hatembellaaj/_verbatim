@@ -54,6 +54,37 @@ def format_cost(input_cost: Optional[float], output_cost: Optional[float]) -> st
     return " · ".join(parts)
 
 
+def estimate_average_chars(verbatims: list[str]) -> int:
+    """Estimate the average number of characters in provided verbatims."""
+
+    if not verbatims:
+        return 0
+
+    cleaned = [v or "" for v in verbatims]
+    total_chars = sum(len(v) for v in cleaned)
+    return int(total_chars / len(cleaned)) if cleaned else 0
+
+
+def estimate_sampling_tokens(sample_size: int, avg_chars_per_verbatim: int) -> tuple[float, float]:
+    """Estimate tokens per verbatim and total input tokens for a sampled batch."""
+
+    if sample_size <= 0 or avg_chars_per_verbatim <= 0:
+        return 0.0, 0.0
+
+    tokens_per_verbatim = max(avg_chars_per_verbatim / 4, 1)
+    total_tokens = tokens_per_verbatim * sample_size
+    return tokens_per_verbatim, total_tokens
+
+
+def estimate_input_cost(total_tokens: float, input_cost_per_1k: Optional[float]) -> float:
+    """Estimate the input cost given total tokens and a price per 1k tokens."""
+
+    if not input_cost_per_1k or total_tokens <= 0:
+        return 0.0
+
+    return (total_tokens / 1000) * input_cost_per_1k
+
+
 def render_llm_selector(label_prefix: str = "OpenAI") -> tuple[str, float, float]:
     """Render LLM + pricing pickers in the main area (not only sidebar).
 

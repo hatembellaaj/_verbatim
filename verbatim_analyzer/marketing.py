@@ -10,7 +10,7 @@ from verbatim_analyzer.database import init_db
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
-from verbatim_analyzer.pricing import render_llm_selector
+from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector
 
 
 def run():
@@ -41,8 +41,15 @@ def run():
 
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")
 
+    verbatims_full = df["Verbatim complet"].fillna("").astype(str)
+    avg_chars_per_verbatim = estimate_average_chars(verbatims_full.tolist())
+
     # === Options sidebar ===
-    options = get_sidebar_options(uploaded_file)
+    options = get_sidebar_options(
+        uploaded_file,
+        verbatim_count=len(df),
+        avg_chars_per_verbatim=avg_chars_per_verbatim,
+    )
     if options.get("use_openai"):
         st.sidebar.info(
             f"LLM sélectionné : **{options['llm_model']}**\n\n"
@@ -68,8 +75,15 @@ def run():
                     texts_private,
                     options["nb_clusters"],
                     model_name=options["llm_model"],
+                    sample_size=options["cluster_sample_size"],
                 )
-                st.success("✅ Clusters extraits avec succès")
+                st.success(
+                    f"✅ Clusters extraits avec succès (échantillon aléatoire de {options['cluster_sample_size']} verbatims)"
+                )
+                st.caption(
+                    f"Longueur moyenne mesurée : ~{avg_chars_per_verbatim} caractères/verbatim • "
+                    f"{len(df)} verbatims au total dans le fichier."
+                )
                 with st.expander("📂 Aperçu des thèmes extraits"):
                     for t in themes:
                         st.markdown(f"**{t['theme']}**")

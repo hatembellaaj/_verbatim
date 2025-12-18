@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import random
 
 import numpy as np
 import pandas as pd
@@ -92,7 +93,13 @@ else:
     client = None
 
 
-def extract_marketing_clusters_with_openai(texts_public, texts_private=None, nb_clusters=5, model_name="gpt-4o-mini"):
+def extract_marketing_clusters_with_openai(
+    texts_public,
+    texts_private=None,
+    nb_clusters=5,
+    model_name="gpt-4o-mini",
+    sample_size: int = 50,
+):
     """
     Analyse les verbatims pour regrouper les avis en clusters marketing
     avec un prompt spécifique orienté note globale.
@@ -105,7 +112,16 @@ def extract_marketing_clusters_with_openai(texts_public, texts_private=None, nb_
     else:
         verbatims_concat = texts_public
 
-    verbatims_concat = verbatims_concat[:50]
+    available = len(verbatims_concat)
+    effective_sample = min(max(1, sample_size), available) if available else 0
+    if effective_sample and effective_sample < available:
+        indices = random.sample(range(available), effective_sample)
+        verbatims_concat = [verbatims_concat[i] for i in indices]
+    logging.info("📊 Échantillon OpenAI : %s verbatims sur %s disponibles", len(verbatims_concat), available)
+
+    if not verbatims_concat:
+        raise ValueError("Aucun verbatim disponible pour l'extraction.")
+
     verbatims_joined = "\n".join(verbatims_concat)
 
     prompt = f"""
@@ -193,7 +209,5 @@ Liste des verbatims à analyser :
     except Exception as e:
         logging.exception("❌ Erreur lors de l'extraction des clusters marketing")
         raise
-
-
 
 
