@@ -1,23 +1,11 @@
-import re
-import time
-import logging
-from openai import OpenAI
-import os
-
-from sentence_transformers import SentenceTransformer, util
-import pandas as pd
-import numpy as np
-
-
-import re
-import time
 import logging
 import os
+import re
 
+import numpy as np
+import pandas as pd
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer, util
-import pandas as pd
-import numpy as np
 
 
 def associer_sous_themes_par_similarity(
@@ -96,10 +84,7 @@ def associer_sous_themes_par_similarity(
     return df_result
 
 
-
-
 openai_api_key = os.getenv("OPENAI_API_KEY")
-assistant_id = os.getenv("ASSISTANT_ID")
 
 if openai_api_key:
     client = OpenAI(api_key=openai_api_key)
@@ -107,7 +92,7 @@ else:
     client = None
 
 
-def extract_marketing_clusters_with_openai(texts_public, texts_private=None, nb_clusters=5):
+def extract_marketing_clusters_with_openai(texts_public, texts_private=None, nb_clusters=5, model_name="gpt-4o-mini"):
     """
     Analyse les verbatims pour regrouper les avis en clusters marketing
     avec un prompt spécifique orienté note globale.
@@ -179,34 +164,18 @@ Liste des verbatims à analyser :
 """
 
     try:
-        logging.info("📤 Envoi du prompt à OpenAI...")
+        logging.info("📤 Envoi du prompt à OpenAI (%s)...", model_name)
         logging.debug("🧾 Prompt complet :\n%s", prompt)
 
-        thread = client.beta.threads.create()
-        logging.info("🧵 Thread ID créé : %s", thread.id)
-
-        client.beta.threads.messages.create(
-            thread_id=thread.id, role="user", content=prompt.strip()
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt.strip()}],
+            temperature=0.2,
         )
 
-        run = client.beta.threads.runs.create(
-            thread_id=thread.id, assistant_id=assistant_id
-        )
-        logging.info("🏃 Run ID lancé : %s", run.id)
+        content = response.choices[0].message.content.strip()
 
-        while True:
-            run_status = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
-            if run_status.status == "completed":
-                logging.info("✅ Analyse terminée avec succès")
-                break
-            elif run_status.status in ["failed", "cancelled"]:
-                raise RuntimeError(f"❌ L'analyse OpenAI a échoué : {run_status.status}")
-            time.sleep(1)
-
-        messages = client.beta.threads.messages.list(thread_id=thread.id)
-        content = messages.data[0].content[0].text.value.strip()
-
-        logging.debug("📩 Réponse brute de l'assistant :\n%s", content)
+        logging.debug("📩 Réponse brute du modèle :\n%s", content)
 
         cleaned = re.sub(r"```(?:python)?", "", content)
         cleaned = cleaned.replace("```", "").strip()
@@ -224,8 +193,6 @@ Liste des verbatims à analyser :
     except Exception as e:
         logging.exception("❌ Erreur lors de l'extraction des clusters marketing")
         raise
-
-
 
 
 

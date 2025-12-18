@@ -42,6 +42,11 @@ def run():
 
     # === Options sidebar ===
     options = get_sidebar_options(uploaded_file)
+    if options.get("use_openai"):
+        st.sidebar.info(
+            f"LLM sélectionné : **{options['llm_model']}**\n\n"
+            f"Coût estimé : ${options['llm_input_cost']:.4f} /1k in · ${options['llm_output_cost']:.4f} /1k out"
+        )
 
     # === Extraction des thèmes ===
     texts_public = df["Verbatim public"].astype(str).tolist()
@@ -51,7 +56,12 @@ def run():
     if options["use_openai"]:
         with st.spinner("🔮 Extraction des clusters via OpenAI..."):
             try:
-                themes = extract_marketing_clusters_with_openai(texts_public, texts_private, options["nb_clusters"])
+                themes = extract_marketing_clusters_with_openai(
+                    texts_public,
+                    texts_private,
+                    options["nb_clusters"],
+                    model_name=options["llm_model"],
+                )
                 st.success("✅ Clusters extraits avec succès")
                 with st.expander("📂 Aperçu des thèmes extraits"):
                     for t in themes:
