@@ -1,20 +1,24 @@
-import pandas as pd
-import numpy as np
+import json
 import logging
 import re
-from transformers import pipeline
 from concurrent.futures import ThreadPoolExecutor
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer, util
+from pathlib import Path
+from typing import List, Optional
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import numpy as np
+import pandas as pd
 import plotly.express as px
-from typing import List, Optional
 from openai import OpenAI
+from sentence_transformers import SentenceTransformer, util
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from transformers import pipeline
 
 # Initialisation OpenAI
 client = OpenAI()
+_PRICING_CACHE = None
 
 # Chargement du modèle RoBERTa (multilingue) pour le sentiment
 analyser_sentiment = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment")
@@ -187,11 +191,22 @@ def verifier_polarite_openai(sous_theme: str, polarite_estimee: str, note_moyenn
                 chosen_model = None
 
         chosen_model = chosen_model or "gpt-4o-mini"
+
+        prompt_tokens_estimes = _estimer_tokens(prompt)
+        cout_estime = _estimer_cout(chosen_model, prompt_tokens_estimes, 50)
+        logging.info(
+            f"💰 Estimation coût OpenAI ({chosen_model}) — prompt: {prompt_tokens_estimes} tokens, "
+            f"réponse estimée: 50 tokens → ~{cout_estime:.6f}$"
+        )
+
         response = client.chat.completions.create(
             model=chosen_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
+
+        _log_cout_reel(chosen_model, response)
+
         correction = response.choices[0].message.content.strip()
         if correction.lower().startswith("pos"):
             return "Positive"
@@ -282,6 +297,51 @@ def enrichir_polarite_veracite(df_melted, df_enriched, subtheme_cols):
             "Véracité polarité": veracite
         })
     return pd.DataFrame(polarite_info)
+
+
+def _load_pricing():
+    global _PRICING_CACHE
+    if _PRICING_CACHE is not None:
+        return _PRICING_CACHE
+    pricing_file = Path(__file__).resolve().parent.parent / "openai_pricing.json"
+    try:
+        with pricing_file.open() as f:
+            _PRICING_CACHE = json.load(f)
+    except Exception as e:
+        logging.warning(f"⚠️ Impossible de lire le fichier de pricing OpenAI ({pricing_file}): {e}")
+        _PRICING_CACHE = {}
+    return _PRICING_CACHE
+
+
+def _estimer_tokens(texte: str) -> int:
+    # Estimation simple : ~4 caractères par token (approx GPT-3.5/4)
+    return max(1, len(texte) // 4)
+
+
+def _estimer_cout(model: str, input_tokens: int, output_tokens: int) -> float:
+    pricing = _load_pricing()
+    if model not in pricing:
+        logging.info(f"ℹ️ Pas de tarif pour {model} → coût non estimé")
+        return 0.0
+    p = pricing[model]
+    input_price = p.get("input_per_1k_tokens", 0)
+    output_price = p.get("output_per_1k_tokens", 0)
+    return (input_tokens / 1000) * input_price + (output_tokens / 1000) * output_price
+
+
+def _log_cout_reel(model: str, response):
+    usage = getattr(response, "usage", None)
+    if not usage:
+        logging.info("ℹ️ Pas de détail d'usage OpenAI retourné ; impossible de journaliser le coût réel.")
+        return
+    input_tokens = getattr(usage, "prompt_tokens", None) or usage.get("prompt_tokens")
+    output_tokens = getattr(usage, "completion_tokens", None) or usage.get("completion_tokens")
+    total_tokens = getattr(usage, "total_tokens", None) or usage.get("total_tokens")
+    cout = _estimer_cout(model, input_tokens or 0, output_tokens or 0)
+    logging.info(
+        f"💳 Coût OpenAI réel ({model}) — prompt: {input_tokens} tokens, réponse: {output_tokens} tokens, "
+        f"total: {total_tokens} tokens → ~{cout:.6f}$"
+    )
 
 
 # -----------------------------
@@ -446,4 +506,3 @@ def calculer_note_ia(verbatim: str) -> int:
     except Exception as e:
         logging.error(f"Erreur calcul note IA: {e}")
         return 3  # neutre fallback
-
