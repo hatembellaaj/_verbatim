@@ -124,6 +124,12 @@ def run():
                     f"Longueur moyenne mesurée : ~{avg_chars_per_verbatim} caractères/verbatim • "
                     f"{len(df)} verbatims au total dans le fichier."
                 )
+                with st.expander("📑 Contexte de l'échantillon envoyé à OpenAI", expanded=False):
+                    st.markdown(
+                        f"{len(sampled_verbatims)} verbatims ont été tirés aléatoirement sur {len(df)} "
+                        "avant l'extraction des thèmes."
+                    )
+                    st.dataframe(pd.DataFrame({"Verbatims échantillonnés": sampled_verbatims}))
                 with st.expander("📂 Aperçu des thèmes extraits"):
                     for t in themes:
                         st.markdown(f"**{t['theme']}**")

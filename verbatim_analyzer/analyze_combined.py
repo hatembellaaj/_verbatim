@@ -150,6 +150,12 @@ def run():
                 st.caption(
                     f"Moyenne observée : ~{avg_chars_per_verbatim} caractères/verbatim sur {len(df)} verbatims."
                 )
+                with st.expander("📑 Contexte des verbatims envoyés à OpenAI", expanded=False):
+                    st.markdown(
+                        f"{len(sampled_verbatims)} verbatims tirés aléatoirement sur {len(df)} "
+                        "ont été transmis à l'API pour générer les thèmes."
+                    )
+                    st.dataframe(pd.DataFrame({"Verbatims échantillonnés": sampled_verbatims}))
                 st.rerun()
             except Exception as e:
                 st.error(f"Erreur OpenAI : {e}")
