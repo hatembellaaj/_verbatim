@@ -73,7 +73,7 @@ def run():
         if "themes_extraits" in st.session_state:
             del st.session_state["themes_extraits"]
         st.rerun()
-    
+
     st.header("🧠 Étape 3 : Définition des thèmes")
     col1, col2 = st.columns(2)
 
@@ -102,6 +102,12 @@ def run():
     options["cluster_sample_size"] = sample_size
     st.session_state["cluster_sample_size"] = sample_size
 
+    trigger_extraction = st.button(
+        "🚀 Lancer l'extraction des clusters via OpenAI",
+        disabled=not use_openai,
+        help="Cliquez après avoir choisi la taille de l'échantillon pour démarrer l'appel OpenAI.",
+    )
+
     themes = []
     sampled_verbatims = st.session_state.get("sampled_verbatims", [])
 
@@ -110,9 +116,9 @@ def run():
         themes = st.session_state["themes_extraits"]
         sampled_verbatims = st.session_state.get("sampled_verbatims", sampled_verbatims)
 
-    # ⚙️ Extraction seulement si OpenAI activé ET pas déjà fait
-    elif use_openai:
-        with st.spinner("Extraction automatique via OpenAI..."):
+    # ⚙️ Extraction seulement si OpenAI activé ET sur action explicite
+    elif use_openai and trigger_extraction:
+        with st.spinner("Extraction via OpenAI en cours..."):
             try:
                 texts_public = df["Verbatim public"].astype(str).tolist()
                 texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
@@ -142,6 +148,8 @@ def run():
             except Exception as e:
                 st.error(f"Erreur OpenAI : {e}")
                 st.stop()
+    elif use_openai and not trigger_extraction:
+        st.info("Choisissez la taille de l'échantillon puis lancez l'extraction OpenAI.")
 
     else:
         user_themes = st.text_area("Thèmes manuels (JSON ou CSV)").strip()

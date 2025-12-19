@@ -82,12 +82,18 @@ def run():
         options["llm_input_cost"] = in_cost
         options["llm_output_cost"] = out_cost
 
+    trigger_extraction = st.button(
+        "🚀 Lancer l'extraction des clusters via OpenAI",
+        disabled=not options.get("use_openai", False),
+        help="Choisissez la taille d'échantillon puis démarrez l'appel OpenAI.",
+    )
+
     # === Extraction des thèmes ===
     texts_public = df["Verbatim public"].astype(str).tolist()
     texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
 
     themes = []
-    if options["use_openai"]:
+    if options["use_openai"] and trigger_extraction:
         with st.spinner("🔮 Extraction des clusters via OpenAI..."):
             try:
                 themes, sampled_verbatims = extract_marketing_clusters_with_openai(
@@ -122,6 +128,8 @@ def run():
             except Exception as e:
                 st.error(f"Erreur OpenAI : {e}")
                 st.stop()
+    elif options["use_openai"] and not trigger_extraction:
+        st.info("Réglez le curseur puis cliquez sur le bouton pour lancer l'extraction OpenAI.")
     else:
         user_themes = st.sidebar.text_area("Liste manuelle des clusters (JSON ou CSV)")
         if not user_themes.strip():
