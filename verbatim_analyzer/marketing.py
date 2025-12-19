@@ -56,26 +56,53 @@ def run():
             f"Coût estimé : ${options['llm_input_cost']:.4f} /1k in · ${options['llm_output_cost']:.4f} /1k out"
         )
 
+    sample_col1, sample_col2 = st.columns([2, 1])
+    with sample_col1:
+        sample_size = st.slider(
+            "Verbatims aléatoires envoyés à OpenAI",
+            min_value=1,
+            max_value=max(1, len(df)),
+            value=options["cluster_sample_size"],
+            disabled=not options.get("use_openai", False),
+            help="Définissez combien de verbatims seront tirés au hasard pour extraire les thèmes Marketing.",
+        )
+    with sample_col2:
+        st.metric(
+            "Coût estimé entrée",
+            f"${options['estimated_openai_cost']:.4f}",
+            help="Basé sur la longueur moyenne observée et le pricing OpenAI sélectionné",
+        )
+
+    options["cluster_sample_size"] = sample_size
+    st.session_state["cluster_sample_size"] = sample_size
+
     with st.expander("⚙️ Choix du LLM & coûts OpenAI", expanded=options.get("use_openai", False)):
         chosen_model, in_cost, out_cost = render_llm_selector("OpenAI")
         options["llm_model"] = chosen_model
         options["llm_input_cost"] = in_cost
         options["llm_output_cost"] = out_cost
 
+    trigger_extraction = st.button(
+        "🚀 Lancer l'extraction des clusters via OpenAI",
+        disabled=not options.get("use_openai", False),
+        help="Choisissez la taille d'échantillon puis démarrez l'appel OpenAI.",
+    )
+
     # === Extraction des thèmes ===
     texts_public = df["Verbatim public"].astype(str).tolist()
     texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
 
     themes = []
-    if options["use_openai"]:
+    if options["use_openai"] and trigger_extraction:
         with st.spinner("🔮 Extraction des clusters via OpenAI..."):
             try:
-                themes = extract_marketing_clusters_with_openai(
+                themes, sampled_verbatims = extract_marketing_clusters_with_openai(
                     texts_public,
                     texts_private,
                     options["nb_clusters"],
                     model_name=options["llm_model"],
                     sample_size=options["cluster_sample_size"],
+                    return_sample=True,
                 )
                 st.success(
                     f"✅ Clusters extraits avec succès (échantillon aléatoire de {options['cluster_sample_size']} verbatims)"
@@ -84,6 +111,12 @@ def run():
                     f"Longueur moyenne mesurée : ~{avg_chars_per_verbatim} caractères/verbatim • "
                     f"{len(df)} verbatims au total dans le fichier."
                 )
+                with st.expander("📑 Contexte de l'échantillon envoyé à OpenAI", expanded=False):
+                    st.markdown(
+                        f"{len(sampled_verbatims)} verbatims ont été tirés aléatoirement sur {len(df)} "
+                        "avant l'extraction des thèmes."
+                    )
+                    st.dataframe(pd.DataFrame({"Verbatims échantillonnés": sampled_verbatims}))
                 with st.expander("📂 Aperçu des thèmes extraits"):
                     for t in themes:
                         st.markdown(f"**{t['theme']}**")
@@ -95,6 +128,8 @@ def run():
             except Exception as e:
                 st.error(f"Erreur OpenAI : {e}")
                 st.stop()
+    elif options["use_openai"] and not trigger_extraction:
+        st.info("Réglez le curseur puis cliquez sur le bouton pour lancer l'extraction OpenAI.")
     else:
         user_themes = st.sidebar.text_area("Liste manuelle des clusters (JSON ou CSV)")
         if not user_themes.strip():

@@ -73,7 +73,7 @@ def run():
         if "themes_extraits" in st.session_state:
             del st.session_state["themes_extraits"]
         st.rerun()
-    
+
     st.header("🧠 Étape 3 : Définition des thèmes")
     col1, col2 = st.columns(2)
 
@@ -82,36 +82,74 @@ def run():
     with col2:
         nb_clusters = st.slider("Nombre de clusters (si OpenAI)", 3, 15, options["nb_clusters"])
 
+    sample_col1, sample_col2 = st.columns([2, 1])
+    with sample_col1:
+        sample_size = st.slider(
+            "Verbatims aléatoires envoyés à OpenAI",
+            min_value=1,
+            max_value=max(1, len(df)),
+            value=options["cluster_sample_size"],
+            disabled=not use_openai,
+            help="Sélectionnez combien de verbatims seront tirés aléatoirement pour générer les thèmes.",
+        )
+    with sample_col2:
+        st.metric(
+            "Coût estimé entrée",
+            f"${options['estimated_openai_cost']:.4f}",
+            help="Basé sur la longueur moyenne observée et le pricing OpenAI sélectionné",
+        )
+
+    options["cluster_sample_size"] = sample_size
+    st.session_state["cluster_sample_size"] = sample_size
+
+    trigger_extraction = st.button(
+        "🚀 Lancer l'extraction des clusters via OpenAI",
+        disabled=not use_openai,
+        help="Cliquez après avoir choisi la taille de l'échantillon pour démarrer l'appel OpenAI.",
+    )
+
     themes = []
+    sampled_verbatims = st.session_state.get("sampled_verbatims", [])
 
     # 🔁 Si on a déjà des thèmes extraits en mémoire, on les réutilise
     if "themes_extraits" in st.session_state:
         themes = st.session_state["themes_extraits"]
+        sampled_verbatims = st.session_state.get("sampled_verbatims", sampled_verbatims)
 
-    # ⚙️ Extraction seulement si OpenAI activé ET pas déjà fait
-    elif use_openai:
-        with st.spinner("Extraction automatique via OpenAI..."):
+    # ⚙️ Extraction seulement si OpenAI activé ET sur action explicite
+    elif use_openai and trigger_extraction:
+        with st.spinner("Extraction via OpenAI en cours..."):
             try:
                 texts_public = df["Verbatim public"].astype(str).tolist()
                 texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
-                themes = extract_marketing_clusters_with_openai(
+                themes, sampled_verbatims = extract_marketing_clusters_with_openai(
                     texts_public,
                     texts_private,
                     nb_clusters,
                     model_name=options["llm_model"],
                     sample_size=options["cluster_sample_size"],
+                    return_sample=True,
                 )
                 st.session_state["themes_extraits"] = themes
+                st.session_state["sampled_verbatims"] = sampled_verbatims
                 st.success(
                     f"✅ Clusters extraits automatiquement (échantillon de {options['cluster_sample_size']} verbatims)"
                 )
                 st.caption(
                     f"Moyenne observée : ~{avg_chars_per_verbatim} caractères/verbatim sur {len(df)} verbatims."
                 )
+                with st.expander("📑 Contexte des verbatims envoyés à OpenAI", expanded=False):
+                    st.markdown(
+                        f"{len(sampled_verbatims)} verbatims tirés aléatoirement sur {len(df)} "
+                        "ont été transmis à l'API pour générer les thèmes."
+                    )
+                    st.dataframe(pd.DataFrame({"Verbatims échantillonnés": sampled_verbatims}))
                 st.rerun()
             except Exception as e:
                 st.error(f"Erreur OpenAI : {e}")
                 st.stop()
+    elif use_openai and not trigger_extraction:
+        st.info("Choisissez la taille de l'échantillon puis lancez l'extraction OpenAI.")
 
     else:
         user_themes = st.text_area("Thèmes manuels (JSON ou CSV)").strip()
@@ -236,6 +274,14 @@ def run():
         "Sélectionnez les thèmes et sous-thèmes à retenir",
         key="cluster_tree"
     )
+
+    if sampled_verbatims:
+        with st.expander("📑 Contexte de l'échantillon OpenAI", expanded=False):
+            st.markdown(
+                f"Échantillon aléatoire : {len(sampled_verbatims)} verbatims envoyés à l'API "
+                f"sur {len(df)} disponibles."
+            )
+            st.dataframe(pd.DataFrame({"Verbatims échantillonnés": sampled_verbatims}))
 
     if selected_nodes and selected_nodes.get("checked"):
         st.session_state["selected_clusters"] = selected_nodes["checked"]
