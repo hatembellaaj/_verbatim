@@ -85,6 +85,73 @@ def estimate_input_cost(total_tokens: float, input_cost_per_1k: Optional[float])
     return (total_tokens / 1000) * input_cost_per_1k
 
 
+def compute_sampling_estimates(
+    sample_size: int,
+    avg_chars_per_verbatim: int,
+    model: Optional[str] = None,
+    pricing: Optional[Dict[str, Dict[str, float]]] = None,
+    input_cost_override: Optional[float] = None,
+) -> Dict[str, float]:
+    """Return a complete view of sampling costs based on file stats and pricing.
+
+    The helper consolidates the average length calculation, token estimation and
+    OpenAI input cost using the pricing loaded for the chosen model. It is used
+    by the sidebar to provide a transparent estimation method to the user.
+    """
+
+    pricing_data = pricing or load_pricing()
+    model_input_cost = input_cost_override
+    if model_input_cost is None and model:
+        model_input_cost, _ = get_model_cost(model, pricing_data)
+
+    tokens_per_verbatim, total_tokens = estimate_sampling_tokens(
+        sample_size,
+        avg_chars_per_verbatim,
+    )
+    estimated_cost = estimate_input_cost(total_tokens, model_input_cost)
+
+    return {
+        "avg_chars_per_verbatim": avg_chars_per_verbatim,
+        "tokens_per_verbatim": tokens_per_verbatim,
+        "total_tokens": total_tokens,
+        "estimated_cost": estimated_cost,
+        "input_cost_used": model_input_cost or 0.0,
+    }
+
+
+def compute_usage_cost(usage, input_cost: float = 0.0, output_cost: float = 0.0) -> Dict[str, float]:
+    """Convertit un objet usage OpenAI en coût réel (tokens + $).
+
+    L'objet ``usage`` peut être un dictionnaire ou l'objet renvoyé par le client
+    officiel. Les coûts sont calculés à partir des prix saisis par l'utilisateur.
+    """
+
+    prompt_tokens = getattr(usage, "prompt_tokens", None) if usage is not None else None
+    completion_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
+    total_tokens = getattr(usage, "total_tokens", None) if usage is not None else None
+
+    if isinstance(usage, dict):
+        prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
+        completion_tokens = usage.get("completion_tokens", completion_tokens)
+        total_tokens = usage.get("total_tokens", total_tokens)
+
+    prompt_tokens = int(prompt_tokens or 0)
+    completion_tokens = int(completion_tokens or 0)
+    total_tokens = int(total_tokens or (prompt_tokens + completion_tokens))
+
+    input_cost_value = (prompt_tokens / 1000) * float(input_cost or 0.0)
+    output_cost_value = (completion_tokens / 1000) * float(output_cost or 0.0)
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "input_cost": input_cost_value,
+        "output_cost": output_cost_value,
+        "total_cost": input_cost_value + output_cost_value,
+    }
+
+
 def render_llm_selector(label_prefix: str = "OpenAI") -> tuple[str, float, float]:
     """Render LLM + pricing pickers in the main area (not only sidebar).
 

@@ -99,10 +99,15 @@ def extract_marketing_clusters_with_openai(
     nb_clusters=5,
     model_name="gpt-4o-mini",
     sample_size: int = 50,
+    return_sample: bool = False,
 ):
     """
     Analyse les verbatims pour regrouper les avis en clusters marketing
     avec un prompt spécifique orienté note globale.
+
+    Un échantillon aléatoire limité à ``sample_size`` verbatims est envoyé à
+    l'API pour limiter le coût. Quand ``return_sample`` est à True, la liste
+    réellement transmise est renvoyée pour affichage dans l'interface.
     """
     if not client:
         raise ValueError("Client OpenAI non initialisé.")
@@ -114,15 +119,24 @@ def extract_marketing_clusters_with_openai(
 
     available = len(verbatims_concat)
     effective_sample = min(max(1, sample_size), available) if available else 0
+    indices = []
     if effective_sample and effective_sample < available:
         indices = random.sample(range(available), effective_sample)
-        verbatims_concat = [verbatims_concat[i] for i in indices]
-    logging.info("📊 Échantillon OpenAI : %s verbatims sur %s disponibles", len(verbatims_concat), available)
+        sampled_verbatims = [verbatims_concat[i] for i in indices]
+    else:
+        sampled_verbatims = verbatims_concat
+        indices = list(range(len(sampled_verbatims)))
 
-    if not verbatims_concat:
+    logging.info(
+        "📊 Échantillon OpenAI : %s verbatims sur %s disponibles",
+        len(sampled_verbatims),
+        available,
+    )
+
+    if not sampled_verbatims:
         raise ValueError("Aucun verbatim disponible pour l'extraction.")
 
-    verbatims_joined = "\n".join(verbatims_concat)
+    verbatims_joined = "\n".join(sampled_verbatims)
 
     prompt = f"""
 Tu es un expert en marketing et en analyse de la satisfaction client.
@@ -188,6 +202,7 @@ Liste des verbatims à analyser :
             messages=[{"role": "user", "content": prompt.strip()}],
             temperature=0.2,
         )
+        usage = getattr(response, "usage", None)
 
         content = response.choices[0].message.content.strip()
 
@@ -204,10 +219,17 @@ Liste des verbatims à analyser :
 
         logging.info("📦 Thèmes extraits : %s", themes)
 
+        if return_sample:
+            return themes, sampled_verbatims, {
+                "total": available,
+                "sampled": len(sampled_verbatims),
+                "indices": indices,
+                "randomized": effective_sample < available,
+            }, usage
+
         return themes
 
     except Exception as e:
         logging.exception("❌ Erreur lors de l'extraction des clusters marketing")
         raise
-
 
