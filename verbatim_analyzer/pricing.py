@@ -119,6 +119,39 @@ def compute_sampling_estimates(
     }
 
 
+def compute_usage_cost(usage, input_cost: float = 0.0, output_cost: float = 0.0) -> Dict[str, float]:
+    """Convertit un objet usage OpenAI en coût réel (tokens + $).
+
+    L'objet ``usage`` peut être un dictionnaire ou l'objet renvoyé par le client
+    officiel. Les coûts sont calculés à partir des prix saisis par l'utilisateur.
+    """
+
+    prompt_tokens = getattr(usage, "prompt_tokens", None) if usage is not None else None
+    completion_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
+    total_tokens = getattr(usage, "total_tokens", None) if usage is not None else None
+
+    if isinstance(usage, dict):
+        prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
+        completion_tokens = usage.get("completion_tokens", completion_tokens)
+        total_tokens = usage.get("total_tokens", total_tokens)
+
+    prompt_tokens = int(prompt_tokens or 0)
+    completion_tokens = int(completion_tokens or 0)
+    total_tokens = int(total_tokens or (prompt_tokens + completion_tokens))
+
+    input_cost_value = (prompt_tokens / 1000) * float(input_cost or 0.0)
+    output_cost_value = (completion_tokens / 1000) * float(output_cost or 0.0)
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "input_cost": input_cost_value,
+        "output_cost": output_cost_value,
+        "total_cost": input_cost_value + output_cost_value,
+    }
+
+
 def render_llm_selector(label_prefix: str = "OpenAI") -> tuple[str, float, float]:
     """Render LLM + pricing pickers in the main area (not only sidebar).
 

@@ -10,7 +10,7 @@ from verbatim_analyzer.database import init_db
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
-from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector
+from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector, compute_usage_cost
 
 
 def run():
@@ -50,6 +50,11 @@ def run():
         verbatim_count=len(df),
         avg_chars_per_verbatim=avg_chars_per_verbatim,
     )
+    if not options.get("use_openai", False):
+        st.session_state.pop("openai_usage_summary", None)
+        st.session_state.pop("sample_metadata", None)
+        st.session_state.pop("sampled_verbatims", None)
+
     if options.get("use_openai"):
         st.sidebar.info(
             f"LLM sélectionné : **{options['llm_model']}**\n\n"
@@ -88,6 +93,10 @@ def run():
         help="Choisissez la taille d'échantillon puis démarrez l'appel OpenAI.",
     )
 
+    sampled_verbatims = st.session_state.get("sampled_verbatims", [])
+    sample_metadata = st.session_state.get("sample_metadata", {})
+    usage_summary = st.session_state.get("openai_usage_summary")
+
     # === Extraction des thèmes ===
     texts_public = df["Verbatim public"].astype(str).tolist()
     texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
@@ -96,7 +105,7 @@ def run():
     if options["use_openai"] and trigger_extraction:
         with st.spinner("🔮 Extraction des clusters via OpenAI..."):
             try:
-                themes, sampled_verbatims = extract_marketing_clusters_with_openai(
+                themes, sampled_verbatims, sample_metadata, usage = extract_marketing_clusters_with_openai(
                     texts_public,
                     texts_private,
                     options["nb_clusters"],
@@ -104,6 +113,10 @@ def run():
                     sample_size=options["cluster_sample_size"],
                     return_sample=True,
                 )
+                usage_summary = compute_usage_cost(usage, options["llm_input_cost"], options["llm_output_cost"])
+                st.session_state["sample_metadata"] = sample_metadata
+                st.session_state["sampled_verbatims"] = sampled_verbatims
+                st.session_state["openai_usage_summary"] = usage_summary
                 st.success(
                     f"✅ Clusters extraits avec succès (échantillon aléatoire de {options['cluster_sample_size']} verbatims)"
                 )
@@ -144,6 +157,32 @@ def run():
     if not themes:
         st.warning("⚠️ Aucun cluster défini.")
         st.stop()
+
+    if sampled_verbatims:
+        with st.expander("📑 Contexte de l'échantillon envoyé à OpenAI", expanded=False):
+            sampling_hint = "Tirage aléatoire" if sample_metadata.get("randomized", False) else "Aucun tirage (tous les verbatims utilisés)"
+            st.markdown(
+                f"{sampling_hint} : {len(sampled_verbatims)} verbatims sélectionnés sur {sample_metadata.get('total', len(df))}."
+            )
+            if sample_metadata.get("indices"):
+                indices_preview = ", ".join(map(str, sample_metadata["indices"][:50]))
+                if len(sample_metadata["indices"]) > 50:
+                    indices_preview += " …"
+                st.caption(f"Indices tirés via random.sample : {indices_preview}")
+            st.dataframe(pd.DataFrame({
+                "Index original": sample_metadata.get("indices", list(range(len(sampled_verbatims)))),
+                "Verbatims échantillonnés": sampled_verbatims
+            }))
+
+    if usage_summary:
+        with st.expander("📡 Consommation réelle OpenAI", expanded=False):
+            st.metric("Tokens entrée", f"{usage_summary['prompt_tokens']:,}")
+            st.metric("Tokens sortie", f"{usage_summary['completion_tokens']:,}")
+            st.metric("Coût total estimé", f"${usage_summary['total_cost']:.4f}")
+            st.caption(
+                f"Détail : entrée ${usage_summary['input_cost']:.4f} · sortie ${usage_summary['output_cost']:.4f} "
+                f"({usage_summary['total_tokens']} tokens cumulés)."
+            )
 
     # === Attribution des sous-thèmes ===
     model_name = "all-MiniLM-L6-v2" if options["model_choice"] == "MiniLM" else "bert-base-nli-mean-tokens"

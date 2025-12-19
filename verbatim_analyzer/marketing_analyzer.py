@@ -119,11 +119,13 @@ def extract_marketing_clusters_with_openai(
 
     available = len(verbatims_concat)
     effective_sample = min(max(1, sample_size), available) if available else 0
+    indices = []
     if effective_sample and effective_sample < available:
         indices = random.sample(range(available), effective_sample)
         sampled_verbatims = [verbatims_concat[i] for i in indices]
     else:
         sampled_verbatims = verbatims_concat
+        indices = list(range(len(sampled_verbatims)))
 
     logging.info(
         "📊 Échantillon OpenAI : %s verbatims sur %s disponibles",
@@ -200,6 +202,7 @@ Liste des verbatims à analyser :
             messages=[{"role": "user", "content": prompt.strip()}],
             temperature=0.2,
         )
+        usage = getattr(response, "usage", None)
 
         content = response.choices[0].message.content.strip()
 
@@ -217,12 +220,16 @@ Liste des verbatims à analyser :
         logging.info("📦 Thèmes extraits : %s", themes)
 
         if return_sample:
-            return themes, sampled_verbatims
+            return themes, sampled_verbatims, {
+                "total": available,
+                "sampled": len(sampled_verbatims),
+                "indices": indices,
+                "randomized": effective_sample < available,
+            }, usage
 
         return themes
 
     except Exception as e:
         logging.exception("❌ Erreur lors de l'extraction des clusters marketing")
         raise
-
 

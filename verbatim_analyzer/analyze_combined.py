@@ -8,7 +8,7 @@ from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from streamlit_tree_select import tree_select
-from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector
+from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector, compute_usage_cost
 
 def run():
     st.title("🧩 Analyse complète des verbatims")
@@ -82,6 +82,11 @@ def run():
     with col2:
         nb_clusters = st.slider("Nombre de clusters (si OpenAI)", 3, 15, options["nb_clusters"])
 
+    if not use_openai:
+        st.session_state.pop("openai_usage_summary", None)
+        st.session_state.pop("sample_metadata", None)
+        st.session_state.pop("sampled_verbatims", None)
+
     sample_col1, sample_col2 = st.columns([2, 1])
     with sample_col1:
         sample_size = st.slider(
@@ -110,11 +115,15 @@ def run():
 
     themes = []
     sampled_verbatims = st.session_state.get("sampled_verbatims", [])
+    sample_metadata = st.session_state.get("sample_metadata", {})
+    usage_summary = st.session_state.get("openai_usage_summary")
 
     # 🔁 Si on a déjà des thèmes extraits en mémoire, on les réutilise
     if "themes_extraits" in st.session_state:
         themes = st.session_state["themes_extraits"]
         sampled_verbatims = st.session_state.get("sampled_verbatims", sampled_verbatims)
+        sample_metadata = st.session_state.get("sample_metadata", sample_metadata)
+        usage_summary = st.session_state.get("openai_usage_summary", usage_summary)
 
     # ⚙️ Extraction seulement si OpenAI activé ET sur action explicite
     elif use_openai and trigger_extraction:
@@ -122,7 +131,7 @@ def run():
             try:
                 texts_public = df["Verbatim public"].astype(str).tolist()
                 texts_private = df["Verbatim privé"].astype(str).tolist() if "Verbatim privé" in df.columns else [""] * len(df)
-                themes, sampled_verbatims = extract_marketing_clusters_with_openai(
+                themes, sampled_verbatims, sample_metadata, usage = extract_marketing_clusters_with_openai(
                     texts_public,
                     texts_private,
                     nb_clusters,
@@ -130,8 +139,11 @@ def run():
                     sample_size=options["cluster_sample_size"],
                     return_sample=True,
                 )
+                usage_summary = compute_usage_cost(usage, options["llm_input_cost"], options["llm_output_cost"])
                 st.session_state["themes_extraits"] = themes
                 st.session_state["sampled_verbatims"] = sampled_verbatims
+                st.session_state["sample_metadata"] = sample_metadata
+                st.session_state["openai_usage_summary"] = usage_summary
                 st.success(
                     f"✅ Clusters extraits automatiquement (échantillon de {options['cluster_sample_size']} verbatims)"
                 )
@@ -162,6 +174,32 @@ def run():
             themes = [{"theme": t.strip(), "subthemes": []} for t in user_themes.split(",") if t.strip()]
         st.success(f"✅ {len(themes)} thèmes chargés manuellement")
 
+
+    if sampled_verbatims:
+        with st.expander("📑 Contexte des verbatims envoyés à OpenAI", expanded=False):
+            sampling_hint = "Tirage aléatoire" if sample_metadata.get("randomized", False) else "Tous les verbatims ont été utilisés"
+            st.markdown(
+                f"{sampling_hint} : {len(sampled_verbatims)} verbatims sur {sample_metadata.get('total', len(df))}."
+            )
+            if sample_metadata.get("indices"):
+                indices_preview = ", ".join(map(str, sample_metadata["indices"][:50]))
+                if len(sample_metadata["indices"]) > 50:
+                    indices_preview += " …"
+                st.caption(f"Indices tirés avec random.sample : {indices_preview}")
+            st.dataframe(pd.DataFrame({
+                "Index original": sample_metadata.get("indices", list(range(len(sampled_verbatims)))),
+                "Verbatims échantillonnés": sampled_verbatims
+            }))
+
+    if usage_summary:
+        with st.expander("📡 Consommation réelle OpenAI", expanded=False):
+            st.metric("Tokens entrée", f"{usage_summary['prompt_tokens']:,}")
+            st.metric("Tokens sortie", f"{usage_summary['completion_tokens']:,}")
+            st.metric("Coût total estimé", f"${usage_summary['total_cost']:.4f}")
+            st.caption(
+                f"Détail : entrée ${usage_summary['input_cost']:.4f} · sortie ${usage_summary['output_cost']:.4f} "
+                f"({usage_summary['total_tokens']} tokens cumulés)."
+            )
 
     # --- Modification / Ajout de clusters ---
     st.divider()
