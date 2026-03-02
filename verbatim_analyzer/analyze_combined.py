@@ -61,7 +61,8 @@ def run():
         st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
         st.stop()
 
-    df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")
+    private_series = df["Verbatim privé"] if "Verbatim privé" in df.columns else pd.Series([""] * len(df), index=df.index)
+    df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + private_series.fillna("")
 
     verbatims_full = df["Verbatim complet"].fillna("").astype(str)
     avg_chars_per_verbatim = estimate_average_chars(verbatims_full.tolist())
