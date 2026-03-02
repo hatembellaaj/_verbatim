@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import re
 import utils
 from column_mapper import load_csv_with_mapping
 from sidebar_options import get_sidebar_options
@@ -9,6 +10,28 @@ from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from streamlit_tree_select import tree_select
 from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector, compute_usage_cost
+
+
+PROFILE_PATTERNS = [
+    ("Couple", [r"\bavec ma femme\b", r"\bavec mon mari\b", r"\ben couple\b"]),
+    ("Famille", [r"\benfants?\b", r"\bfamille\b", r"\bpoussette\b"]),
+    ("Groupe d'amis", [r"\bavec mes amis\b", r"\bentre amis\b", r"\bnotre groupe\b"]),
+    ("Accompagnant / attente", [r"\battendre\b", r"\ben attendant\b", r"\battente\b"]),
+    ("Client seul", [r"\bseul\b", r"\bseule\b", r"\bje suis venu\b", r"\bje viens\b"]),
+]
+
+
+def infer_profile_from_verbatim(text: str):
+    if not isinstance(text, str) or not text.strip():
+        return "Inconnu", 0.0, "Aucun indice"
+
+    lowered = text.lower()
+    for profile, patterns in PROFILE_PATTERNS:
+        for pattern in patterns:
+            if re.search(pattern, lowered):
+                return profile, 0.85, f"Indice détecté: `{pattern}`"
+
+    return "Inconnu", 0.2, "Aucun pattern détecté"
 
 def run():
     st.title("🧩 Analyse complète des verbatims")
@@ -38,7 +61,8 @@ def run():
         st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
         st.stop()
 
-    df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")
+    private_series = df["Verbatim privé"] if "Verbatim privé" in df.columns else pd.Series([""] * len(df), index=df.index)
+    df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + private_series.fillna("")
 
     verbatims_full = df["Verbatim complet"].fillna("").astype(str)
     avg_chars_per_verbatim = estimate_average_chars(verbatims_full.tolist())
@@ -491,6 +515,60 @@ def run():
                 titre=f"Rapport synthèse - {mode}",
                 filename=f"rapport_{'ia' if 'IA' in mode else 'marketing'}.pdf"
             )
+
+
+
+    # === Étape 6 ter : Vue Lieux & Profils inférés ===
+    st.header("📍 Étape 6 ter : Pilotage par lieux et profils inférés")
+    place_col_candidates = ["Code Cinémas", "Cinémas", "Région"]
+    place_col = next((c for c in place_col_candidates if c in df_enriched.columns), None)
+
+    df_enriched[["Profil inféré", "Confiance profil", "Justification profil"]] = df_enriched["Verbatim complet"].apply(
+        lambda txt: pd.Series(infer_profile_from_verbatim(txt))
+    )
+
+    if place_col:
+        st.caption(f"Segmentation lieux active via la colonne **{place_col}**.")
+
+        place_summary = (
+            df_enriched
+            .assign(**{place_col: df_enriched[place_col].fillna("Inconnu")})
+            .groupby(place_col)
+            .agg(
+                verbatims=("Verbatim complet", "count"),
+                note_moyenne=(note_col, "mean"),
+                part_profils_identifies=("Confiance profil", lambda x: float((x >= 0.8).mean() * 100)),
+            )
+            .sort_values("verbatims", ascending=False)
+            .reset_index()
+        )
+        st.dataframe(place_summary)
+
+        fig_place = px.bar(
+            place_summary,
+            x=place_col,
+            y="verbatims",
+            title="Volume de verbatims par lieu",
+        )
+        st.plotly_chart(fig_place, use_container_width=True)
+
+        cross = (
+            df_enriched
+            .assign(**{place_col: df_enriched[place_col].fillna("Inconnu")})
+            .groupby([place_col, "Profil inféré"]) 
+            .size()
+            .reset_index(name="Occurrences")
+            .sort_values("Occurrences", ascending=False)
+        )
+        st.markdown("**Croisement Lieu × Profil inféré**")
+        st.dataframe(cross)
+    else:
+        st.warning("Aucune colonne de lieu détectée (Code Cinémas / Cinémas / Région).")
+
+    with st.expander("🔎 Profils inférés (détail)", expanded=False):
+        st.dataframe(
+            df_enriched[["Verbatim public", "Profil inféré", "Confiance profil", "Justification profil"]].head(200)
+        )
 
     # === Étape 7 : Export CSV ===
     st.header("⬇️ Étape 7 : Export des résultats")
