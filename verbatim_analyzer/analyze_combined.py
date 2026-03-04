@@ -575,6 +575,64 @@ def run():
             df_enriched[["Verbatim public", "Profil inféré", "Confiance profil", "Justification profil"]].head(200)
         )
 
+    # === Étape 6 quater : Graphiques statistiques personnalisés ===
+    st.header("🧮 Étape 6 quater : Graphique statistique personnalisé")
+
+    colonnes_excel = [c for c in df.columns if c not in ["Verbatim complet"]]
+    if not colonnes_excel:
+        st.info("Aucune colonne exploitable détectée pour les statistiques personnalisées.")
+    else:
+        options_clusters = [f"Cluster : {t.get('theme', '')}" for t in themes_utilises if t.get('theme')]
+        options_sous_clusters = [f"Sous-cluster : {c}" for c in subtheme_cols]
+        options_analyse = options_clusters + options_sous_clusters
+
+        if not options_analyse:
+            st.info("Aucun cluster/sous-cluster disponible pour le croisement statistique.")
+        else:
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                colonne_stat = st.selectbox("Colonne Excel à analyser", colonnes_excel, key="custom_stat_col")
+            with col_b:
+                cible_cluster = st.selectbox("Cluster / Sous-cluster", options_analyse, key="custom_stat_cluster")
+            with col_c:
+                type_graphe = st.selectbox("Type de graphique", ["Camembert", "Histogramme"], key="custom_stat_graph")
+
+            if cible_cluster.startswith("Sous-cluster : "):
+                sous_cluster_col = cible_cluster.replace("Sous-cluster : ", "", 1)
+                masque = df_enriched[sous_cluster_col].notna()
+                titre_cible = sous_cluster_col
+            else:
+                theme_name = cible_cluster.replace("Cluster : ", "", 1)
+                sous_cols_theme = [c for c in subtheme_cols if c.startswith(f"{theme_name}::")]
+                masque = (
+                    df_enriched[sous_cols_theme].notna().any(axis=1)
+                    if sous_cols_theme
+                    else pd.Series([False] * len(df_enriched), index=df_enriched.index)
+                )
+                titre_cible = theme_name
+
+            data_filtre = df_enriched.loc[masque].copy()
+            if data_filtre.empty:
+                st.warning("Aucune donnée disponible pour cette sélection cluster/sous-cluster.")
+            else:
+                distribution = (
+                    data_filtre[colonne_stat]
+                    .fillna("Inconnu")
+                    .astype(str)
+                    .value_counts()
+                    .reset_index()
+                )
+                distribution.columns = [colonne_stat, "Occurrences"]
+
+                st.dataframe(distribution, use_container_width=True)
+
+                titre = f"{type_graphe} de '{colonne_stat}' pour '{titre_cible}'"
+                if type_graphe == "Camembert":
+                    fig_custom = px.pie(distribution, names=colonne_stat, values="Occurrences", title=titre)
+                else:
+                    fig_custom = px.bar(distribution, x=colonne_stat, y="Occurrences", title=titre)
+                st.plotly_chart(fig_custom, use_container_width=True)
+
     # === Étape 7 : Export CSV ===
     st.header("⬇️ Étape 7 : Export des résultats")
     csv_bytes = utils.preparer_csv_export(df_enriched, f"resultats_{'ia' if 'IA' in mode else 'marketing'}_fusion.csv")
