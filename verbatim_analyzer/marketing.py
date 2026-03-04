@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import utils
+from utils import enrichir_colonnes_demographiques
 from column_mapper import load_csv_with_mapping
 from verbatim_analyzer.database import init_db
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
@@ -24,7 +25,7 @@ def run():
     df = load_csv_with_mapping(
         uploaded_file,
         required_fields=["Verbatim public", "Note globale avis 1"],
-        optional_fields=["Verbatim privé"],
+        optional_fields=["Verbatim privé", "Zone ou région", "Sexe", "Prénom"],
         key_prefix="marketing",
     )
 
@@ -38,6 +39,10 @@ def run():
             + " est requis pour poursuivre."
         )
         st.stop()
+
+    df, lignes_sexe_inferrees = enrichir_colonnes_demographiques(df)
+    if "Sexe" in df.columns:
+        st.caption(f"Sexe normalisé. {lignes_sexe_inferrees} ligne(s) complétée(s) via la colonne Prénom.")
 
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")
 
