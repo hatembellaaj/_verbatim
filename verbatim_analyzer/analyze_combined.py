@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import re
 import utils
+from utils import enrichir_colonnes_demographiques
 from column_mapper import load_csv_with_mapping
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
@@ -51,7 +52,7 @@ def run():
     df = load_csv_with_mapping(
         uploaded_file,
         required_fields=["Verbatim public"],
-        optional_fields=["Verbatim privé", "Note globale avis 1"],
+        optional_fields=["Verbatim privé", "Note globale avis 1", "Zone ou région", "Sexe", "Prénom"],
         key_prefix="combined",
     )
 
@@ -60,6 +61,10 @@ def run():
     if "Verbatim public" not in df.columns:
         st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
         st.stop()
+
+    df, lignes_sexe_inferrees = enrichir_colonnes_demographiques(df)
+    if "Sexe" in df.columns:
+        st.caption(f"Sexe normalisé. {lignes_sexe_inferrees} ligne(s) complétée(s) via la colonne Prénom.")
 
     private_series = df["Verbatim privé"] if "Verbatim privé" in df.columns else pd.Series([""] * len(df), index=df.index)
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + private_series.fillna("")
