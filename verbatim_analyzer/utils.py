@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Optional
@@ -34,6 +35,19 @@ REGEX_MOTS_NEGATIFS = re.compile(
 )
 MOTS_NEGATIFS = ["manque", "insuffisant", "mauvais", "problème", "attente", "cher", "décevant", "raté"]
 MOTS_POSITIFS = ["magique", "féérique", "excellent", "bravo", "super", "parfait"]
+
+MALE_FIRSTNAMES = {
+    "adam", "alexandre", "antoine", "arthur", "benjamin", "charles", "david", "enzo",
+    "gabriel", "hugo", "jacques", "jean", "jules", "kevin", "leo", "lucas", "louis",
+    "mathieu", "maxime", "mehdi", "michel", "nicolas", "noah", "paul", "pierre", "raphael",
+    "thomas", "victor", "yassine"
+}
+
+FEMALE_FIRSTNAMES = {
+    "alice", "amelie", "anais", "camille", "charlotte", "chloe", "claire", "emma", "eva",
+    "fatima", "ines", "isabelle", "jade", "julie", "laura", "lea", "lina", "louise", "manon", "marie",
+    "mila", "nadia", "nina", "oceane", "pauline", "sarah", "sophie", "zoe"
+}
 
 
 # -----------------------------
@@ -149,6 +163,61 @@ def verifier_coherence_semantique(df, subtheme_cols, seuil=0.3, alpha=0.9, model
 # -----------------------------
 def contient_mots_negatifs(texte):
     return bool(REGEX_MOTS_NEGATIFS.search(texte))
+
+
+def _normaliser_texte(texte: str) -> str:
+    if not isinstance(texte, str):
+        return ""
+    sans_accents = unicodedata.normalize("NFKD", texte).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z]", "", sans_accents.lower())
+
+
+def _normaliser_sexe(valeur) -> str:
+    if not isinstance(valeur, str) or not valeur.strip():
+        return ""
+    nettoyee = _normaliser_texte(valeur)
+    if nettoyee in {"f", "femme", "feminin", "female", "woman"}:
+        return "Femme"
+    if nettoyee in {"h", "homme", "masculin", "male", "man"}:
+        return "Homme"
+    return ""
+
+
+def inferer_sexe_par_prenom(prenom) -> str:
+    """Infère un sexe probable à partir du 1er prénom normalisé.
+
+    Exemple: "Isabelle" → "Femme" (présent dans FEMALE_FIRSTNAMES).
+    """
+    if not isinstance(prenom, str) or not prenom.strip():
+        return ""
+    prenom_canonique = _normaliser_texte(prenom.split()[0])
+    if prenom_canonique in FEMALE_FIRSTNAMES:
+        return "Femme"
+    if prenom_canonique in MALE_FIRSTNAMES:
+        return "Homme"
+    return ""
+
+
+def enrichir_colonnes_demographiques(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Normalise la colonne Sexe et complète les valeurs manquantes via Prénom."""
+    if "Sexe" not in df.columns and "Prénom" not in df.columns:
+        return df, 0
+
+    if "Sexe" not in df.columns:
+        df["Sexe"] = ""
+
+    sexe_normalise = df["Sexe"].apply(_normaliser_sexe)
+    sexe_inferre = df["Prénom"].apply(inferer_sexe_par_prenom) if "Prénom" in df.columns else ""
+
+    mask_manquant = sexe_normalise == ""
+    if isinstance(sexe_inferre, pd.Series):
+        sexe_normalise = sexe_normalise.mask(mask_manquant, sexe_inferre)
+
+    sexe_normalise = sexe_normalise.replace("", "Inconnu")
+    lignes_inferrees = int((mask_manquant & (sexe_normalise != "Inconnu")).sum())
+
+    df["Sexe"] = sexe_normalise
+    return df, lignes_inferrees
 
 
 def analyser_sentiment_mixte(texte):
