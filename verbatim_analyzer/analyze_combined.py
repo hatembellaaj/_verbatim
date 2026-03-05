@@ -649,27 +649,41 @@ def run():
                     "La colonne sélectionnée du fichier d'origine n'est pas disponible après alignement des données."
                 )
             else:
-                distribution = (
-                    data_filtre[colonne_stat]
-                    .fillna("Inconnu")
-                    .astype(str)
-                    .value_counts()
+                stats_custom = (
+                    data_filtre.assign(_col=data_filtre[colonne_stat].fillna("Inconnu").astype(str))
+                    .groupby("_col")
+                    .agg(
+                        Occurrences=(colonne_stat, "size"),
+                        Note_moyenne=(note_col, lambda s: pd.to_numeric(s, errors="coerce").mean()),
+                    )
                     .reset_index()
+                    .rename(columns={"_col": colonne_stat})
                 )
-                distribution.columns = [colonne_stat, "Occurrences"]
+                stats_custom["Note moyenne"] = stats_custom["Note_moyenne"].round(2)
+                stats_custom = stats_custom.drop(columns=["Note_moyenne"])
 
                 # Tri naturel des notes 1,2,3... quand la colonne est numérique
-                valeurs_num = pd.to_numeric(distribution[colonne_stat], errors="coerce")
+                valeurs_num = pd.to_numeric(stats_custom[colonne_stat], errors="coerce")
                 if valeurs_num.notna().all():
-                    distribution = distribution.assign(_num=valeurs_num).sort_values("_num").drop(columns=["_num"])
+                    stats_custom = stats_custom.assign(_num=valeurs_num).sort_values("_num").drop(columns=["_num"])
+                else:
+                    stats_custom = stats_custom.sort_values("Occurrences", ascending=False)
 
-                st.dataframe(distribution, use_container_width=True)
+                st.dataframe(stats_custom, use_container_width=True)
 
-                labels = distribution[colonne_stat].tolist()
-                counts = distribution["Occurrences"].tolist()
+                mesure_graph = st.selectbox(
+                    "Mesure à représenter",
+                    ["Occurrences", "Note moyenne"],
+                    index=1,
+                    key="custom_stat_measure",
+                    help="Choisissez si le graphe doit afficher le volume ou la moyenne de notes.",
+                )
+
+                labels = stats_custom[colonne_stat].tolist()
+                values = stats_custom[mesure_graph].fillna(0).tolist()
                 x_pos = np.arange(len(labels))
 
-                titre = f"{type_graphe} de '{colonne_stat}' pour '{titre_cible}'"
+                titre = f"{type_graphe} de '{colonne_stat}' pour '{titre_cible}' ({mesure_graph})"
                 fig_custom = None
 
                 if type_graphe == "Vague 3D (notes 1-5)":
@@ -718,7 +732,7 @@ def run():
                         )
                 elif type_graphe == "Histogramme 3D":
                     xs, ys, zs = [], [], []
-                    for i, val in enumerate(counts):
+                    for i, val in enumerate(values):
                         xs.extend([i, i, None])
                         ys.extend([0, 0, None])
                         zs.extend([0, val, None])
@@ -738,11 +752,11 @@ def run():
                         go.Scatter3d(
                             x=x_pos,
                             y=[0] * len(x_pos),
-                            z=counts,
+                            z=values,
                             mode="markers+text",
-                            text=[str(v) for v in counts],
+                            text=[str(v) for v in values],
                             textposition="top center",
-                            marker=dict(size=6, color=counts, colorscale="Viridis"),
+                            marker=dict(size=6, color=values, colorscale="Viridis"),
                             showlegend=False,
                         )
                     )
@@ -751,7 +765,7 @@ def run():
                         scene=dict(
                             xaxis=dict(title=colonne_stat, tickmode="array", tickvals=x_pos.tolist(), ticktext=labels),
                             yaxis=dict(title="Cluster", tickvals=[0], ticktext=[titre_cible]),
-                            zaxis=dict(title="Occurrences"),
+                            zaxis=dict(title=mesure_graph),
                         ),
                     )
                 elif type_graphe == "Courbe 3D":
@@ -760,12 +774,12 @@ def run():
                             go.Scatter3d(
                                 x=x_pos,
                                 y=[0] * len(x_pos),
-                                z=counts,
+                                z=values,
                                 mode="lines+markers+text",
-                                text=[str(v) for v in counts],
+                                text=[str(v) for v in values],
                                 textposition="top center",
                                 line=dict(color="#ff7f0e", width=6),
-                                marker=dict(size=5, color=counts, colorscale="Plasma"),
+                                marker=dict(size=5, color=values, colorscale="Plasma"),
                                 showlegend=False,
                             )
                         ]
@@ -775,7 +789,7 @@ def run():
                         scene=dict(
                             xaxis=dict(title=colonne_stat, tickmode="array", tickvals=x_pos.tolist(), ticktext=labels),
                             yaxis=dict(title="Cluster", tickvals=[0], ticktext=[titre_cible]),
-                            zaxis=dict(title="Occurrences"),
+                            zaxis=dict(title=mesure_graph),
                         ),
                     )
                 else:
@@ -786,7 +800,7 @@ def run():
                         fig_custom.add_trace(
                             go.Pie(
                                 labels=labels,
-                                values=counts,
+                                values=values,
                                 hole=0.35,
                                 sort=False,
                                 direction="clockwise",
