@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 import plotly.express as px 
 import utils
+from utils import enrichir_colonnes_demographiques
 from column_mapper import render_column_mapper
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
@@ -26,13 +27,17 @@ def run():
     df, _ = render_column_mapper(
         df,
         required_fields=["Verbatim public"],
-        optional_fields=["Verbatim privé"],
+        optional_fields=["Verbatim privé", "Zone ou région", "Sexe", "Prénom"],
         key_prefix="ia_rating",
     )
 
     if "Verbatim public" not in df.columns:
         st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
         st.stop()
+
+    df, lignes_sexe_inferrees = enrichir_colonnes_demographiques(df)
+    if "Sexe" in df.columns:
+        st.caption(f"Sexe normalisé. {lignes_sexe_inferrees} ligne(s) complétée(s) via la colonne Prénom.")
 
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + df.get("Verbatim privé", "").fillna("")
 

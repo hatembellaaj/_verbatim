@@ -2,8 +2,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+import numpy as np
 import re
 import utils
+from utils import enrichir_colonnes_demographiques
 from column_mapper import load_csv_with_mapping
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
@@ -48,18 +51,46 @@ def run():
         st.info("En attente d’un fichier CSV…")
         st.stop()
 
+    # Lecture complète du fichier d'origine pour garder toutes les colonnes Excel
+    try:
+        uploaded_file.seek(0)
+        df_original = pd.read_csv(
+            uploaded_file,
+            sep=None,
+            engine="python",
+            on_bad_lines="skip",
+        )
+    except Exception as e:
+        st.error(f"Erreur de lecture du fichier d'origine : {e}")
+        st.stop()
+
     df = load_csv_with_mapping(
         uploaded_file,
         required_fields=["Verbatim public"],
-        optional_fields=["Verbatim privé", "Note globale avis 1"],
+        optional_fields=["Verbatim privé", "Note globale avis 1", "Zone ou région", "Sexe", "Prénom"],
         key_prefix="combined",
     )
 
     st.success(f"✅ {len(df)} lignes chargées après mapping des colonnes")
 
+    if len(df_original) != len(df):
+        st.warning(
+            "⚠️ Le nombre de lignes du fichier d'origine diffère après mapping ; "
+            "les colonnes d'origine seront alignées sur les lignes conservées."
+        )
+
+    # Réinjecte les colonnes du fichier d'origine pour les analyses statistiques personnalisées
+    for col in df_original.columns:
+        if col not in df.columns:
+            df[col] = df_original[col].iloc[: len(df)].values
+
     if "Verbatim public" not in df.columns:
         st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
         st.stop()
+
+    df, lignes_sexe_inferrees = enrichir_colonnes_demographiques(df)
+    if "Sexe" in df.columns:
+        st.caption(f"Sexe normalisé. {lignes_sexe_inferrees} ligne(s) complétée(s) via la colonne Prénom.")
 
     private_series = df["Verbatim privé"] if "Verbatim privé" in df.columns else pd.Series([""] * len(df), index=df.index)
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + private_series.fillna("")
@@ -569,6 +600,206 @@ def run():
         st.dataframe(
             df_enriched[["Verbatim public", "Profil inféré", "Confiance profil", "Justification profil"]].head(200)
         )
+
+    # === Étape 6 quater : Graphiques statistiques personnalisés ===
+    st.header("🧮 Étape 6 quater : Graphique statistique personnalisé (3D)")
+
+    colonnes_excel = list(df_original.columns)
+    if not colonnes_excel:
+        st.info("Aucune colonne exploitable détectée dans le fichier d'origine.")
+    else:
+        options_clusters = [f"Cluster : {t.get('theme', '')}" for t in themes_utilises if t.get('theme')]
+        options_sous_clusters = [f"Sous-cluster : {c}" for c in subtheme_cols]
+        options_analyse = options_clusters + options_sous_clusters
+
+        if not options_analyse:
+            st.info("Aucun cluster/sous-cluster disponible pour le croisement statistique.")
+        else:
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                colonne_stat = st.selectbox("Colonne Excel d'origine à analyser", colonnes_excel, key="custom_stat_col")
+            with col_b:
+                cible_cluster = st.selectbox("Cluster / Sous-cluster", options_analyse, key="custom_stat_cluster")
+            with col_c:
+                type_graphe = st.selectbox(
+                    "Type de graphique 3D",
+                    ["Histogramme 3D", "Courbe 3D", "Camembert 3D", "Vague 3D (notes 1-5)"],
+                    key="custom_stat_graph",
+                )
+
+            if cible_cluster.startswith("Sous-cluster : "):
+                sous_cluster_col = cible_cluster.replace("Sous-cluster : ", "", 1)
+                masque = df_enriched[sous_cluster_col].notna()
+                titre_cible = sous_cluster_col
+            else:
+                theme_name = cible_cluster.replace("Cluster : ", "", 1)
+                sous_cols_theme = [c for c in subtheme_cols if c.startswith(f"{theme_name}::")]
+                masque = (
+                    df_enriched[sous_cols_theme].notna().any(axis=1)
+                    if sous_cols_theme
+                    else pd.Series([False] * len(df_enriched), index=df_enriched.index)
+                )
+                titre_cible = theme_name
+
+            data_filtre = df_enriched.loc[masque].copy()
+            if data_filtre.empty:
+                st.warning("Aucune donnée disponible pour cette sélection cluster/sous-cluster.")
+            elif colonne_stat not in data_filtre.columns:
+                st.error(
+                    "La colonne sélectionnée du fichier d'origine n'est pas disponible après alignement des données."
+                )
+            else:
+                distribution = (
+                    data_filtre[colonne_stat]
+                    .fillna("Inconnu")
+                    .astype(str)
+                    .value_counts()
+                    .reset_index()
+                )
+                distribution.columns = [colonne_stat, "Occurrences"]
+
+                # Tri naturel des notes 1,2,3... quand la colonne est numérique
+                valeurs_num = pd.to_numeric(distribution[colonne_stat], errors="coerce")
+                if valeurs_num.notna().all():
+                    distribution = distribution.assign(_num=valeurs_num).sort_values("_num").drop(columns=["_num"])
+
+                st.dataframe(distribution, use_container_width=True)
+
+                labels = distribution[colonne_stat].tolist()
+                counts = distribution["Occurrences"].tolist()
+                x_pos = np.arange(len(labels))
+
+                titre = f"{type_graphe} de '{colonne_stat}' pour '{titre_cible}'"
+                fig_custom = None
+
+                if type_graphe == "Vague 3D (notes 1-5)":
+                    notes_df = data_filtre[[colonne_stat, note_col]].copy()
+                    notes_df[note_col] = pd.to_numeric(notes_df[note_col], errors="coerce")
+                    notes_df = notes_df.dropna(subset=[colonne_stat, note_col])
+                    notes_df["Note arrondie"] = notes_df[note_col].round().clip(1, 5).astype(int)
+
+                    if notes_df.empty:
+                        st.warning("Impossible de construire la vague 3D : aucune note numérique exploitable.")
+                    else:
+                        pivot = (
+                            notes_df.groupby([colonne_stat, "Note arrondie"])[note_col]
+                            .mean()
+                            .unstack("Note arrondie")
+                            .reindex(columns=[1, 2, 3, 4, 5])
+                        )
+
+                        regions = pivot.index.tolist()
+                        fig_custom = go.Figure()
+                        for region_idx, region in enumerate(regions):
+                            z_vals = [None if pd.isna(v) else float(v) for v in pivot.loc[region].tolist()]
+                            fig_custom.add_trace(
+                                go.Scatter3d(
+                                    x=[1, 2, 3, 4, 5],
+                                    y=[region_idx] * 5,
+                                    z=z_vals,
+                                    mode="lines+markers",
+                                    name=str(region),
+                                    line=dict(width=5),
+                                    marker=dict(size=5),
+                                    connectgaps=False,
+                                )
+                            )
+
+                        fig_custom.update_layout(
+                            title=(
+                                f"Vague 3D des notes moyennes par '{colonne_stat}' "
+                                f"pour '{titre_cible}' (vides = absence de données)"
+                            ),
+                            scene=dict(
+                                xaxis=dict(title="Note (1 à 5)", tickvals=[1, 2, 3, 4, 5]),
+                                yaxis=dict(title=colonne_stat, tickvals=list(range(len(regions))), ticktext=[str(r) for r in regions]),
+                                zaxis=dict(title="Note moyenne"),
+                            ),
+                        )
+                elif type_graphe == "Histogramme 3D":
+                    xs, ys, zs = [], [], []
+                    for i, val in enumerate(counts):
+                        xs.extend([i, i, None])
+                        ys.extend([0, 0, None])
+                        zs.extend([0, val, None])
+
+                    fig_custom = go.Figure()
+                    fig_custom.add_trace(
+                        go.Scatter3d(
+                            x=xs,
+                            y=ys,
+                            z=zs,
+                            mode="lines",
+                            line=dict(width=8, color="#1f77b4"),
+                            showlegend=False,
+                        )
+                    )
+                    fig_custom.add_trace(
+                        go.Scatter3d(
+                            x=x_pos,
+                            y=[0] * len(x_pos),
+                            z=counts,
+                            mode="markers+text",
+                            text=[str(v) for v in counts],
+                            textposition="top center",
+                            marker=dict(size=6, color=counts, colorscale="Viridis"),
+                            showlegend=False,
+                        )
+                    )
+                    fig_custom.update_layout(
+                        title=titre,
+                        scene=dict(
+                            xaxis=dict(title=colonne_stat, tickmode="array", tickvals=x_pos.tolist(), ticktext=labels),
+                            yaxis=dict(title="Cluster", tickvals=[0], ticktext=[titre_cible]),
+                            zaxis=dict(title="Occurrences"),
+                        ),
+                    )
+                elif type_graphe == "Courbe 3D":
+                    fig_custom = go.Figure(
+                        data=[
+                            go.Scatter3d(
+                                x=x_pos,
+                                y=[0] * len(x_pos),
+                                z=counts,
+                                mode="lines+markers+text",
+                                text=[str(v) for v in counts],
+                                textposition="top center",
+                                line=dict(color="#ff7f0e", width=6),
+                                marker=dict(size=5, color=counts, colorscale="Plasma"),
+                                showlegend=False,
+                            )
+                        ]
+                    )
+                    fig_custom.update_layout(
+                        title=titre,
+                        scene=dict(
+                            xaxis=dict(title=colonne_stat, tickmode="array", tickvals=x_pos.tolist(), ticktext=labels),
+                            yaxis=dict(title="Cluster", tickvals=[0], ticktext=[titre_cible]),
+                            zaxis=dict(title="Occurrences"),
+                        ),
+                    )
+                else:
+                    # Plotly ne propose pas de camembert 3D natif : simulation 3D par empilement
+                    fig_custom = go.Figure()
+                    depth = 10
+                    for i in range(depth):
+                        fig_custom.add_trace(
+                            go.Pie(
+                                labels=labels,
+                                values=counts,
+                                hole=0.35,
+                                sort=False,
+                                direction="clockwise",
+                                textinfo="none" if i < depth - 1 else "label+percent",
+                                marker=dict(line=dict(color="rgba(0,0,0,0.15)", width=1)),
+                                domain={"x": [0.05, 0.95], "y": [0.05 + i * 0.003, 0.95 + i * 0.003]},
+                                showlegend=i == depth - 1,
+                            )
+                        )
+                    fig_custom.update_layout(title=f"{titre} (simulation 3D)")
+
+                if fig_custom is not None:
+                    st.plotly_chart(fig_custom, use_container_width=True)
 
     # === Étape 7 : Export CSV ===
     st.header("⬇️ Étape 7 : Export des résultats")
