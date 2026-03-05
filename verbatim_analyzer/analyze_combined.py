@@ -623,7 +623,7 @@ def run():
             with col_c:
                 type_graphe = st.selectbox(
                     "Type de graphique 3D",
-                    ["Histogramme 3D", "Courbe 3D", "Camembert 3D"],
+                    ["Histogramme 3D", "Courbe 3D", "Camembert 3D", "Vague 3D (notes 1-5)"],
                     key="custom_stat_graph",
                 )
 
@@ -670,8 +670,53 @@ def run():
                 x_pos = np.arange(len(labels))
 
                 titre = f"{type_graphe} de '{colonne_stat}' pour '{titre_cible}'"
+                fig_custom = None
 
-                if type_graphe == "Histogramme 3D":
+                if type_graphe == "Vague 3D (notes 1-5)":
+                    notes_df = data_filtre[[colonne_stat, note_col]].copy()
+                    notes_df[note_col] = pd.to_numeric(notes_df[note_col], errors="coerce")
+                    notes_df = notes_df.dropna(subset=[colonne_stat, note_col])
+                    notes_df["Note arrondie"] = notes_df[note_col].round().clip(1, 5).astype(int)
+
+                    if notes_df.empty:
+                        st.warning("Impossible de construire la vague 3D : aucune note numérique exploitable.")
+                    else:
+                        pivot = (
+                            notes_df.groupby([colonne_stat, "Note arrondie"])[note_col]
+                            .mean()
+                            .unstack("Note arrondie")
+                            .reindex(columns=[1, 2, 3, 4, 5])
+                        )
+
+                        regions = pivot.index.tolist()
+                        fig_custom = go.Figure()
+                        for region_idx, region in enumerate(regions):
+                            z_vals = [None if pd.isna(v) else float(v) for v in pivot.loc[region].tolist()]
+                            fig_custom.add_trace(
+                                go.Scatter3d(
+                                    x=[1, 2, 3, 4, 5],
+                                    y=[region_idx] * 5,
+                                    z=z_vals,
+                                    mode="lines+markers",
+                                    name=str(region),
+                                    line=dict(width=5),
+                                    marker=dict(size=5),
+                                    connectgaps=False,
+                                )
+                            )
+
+                        fig_custom.update_layout(
+                            title=(
+                                f"Vague 3D des notes moyennes par '{colonne_stat}' "
+                                f"pour '{titre_cible}' (vides = absence de données)"
+                            ),
+                            scene=dict(
+                                xaxis=dict(title="Note (1 à 5)", tickvals=[1, 2, 3, 4, 5]),
+                                yaxis=dict(title=colonne_stat, tickvals=list(range(len(regions))), ticktext=[str(r) for r in regions]),
+                                zaxis=dict(title="Note moyenne"),
+                            ),
+                        )
+                elif type_graphe == "Histogramme 3D":
                     xs, ys, zs = [], [], []
                     for i, val in enumerate(counts):
                         xs.extend([i, i, None])
@@ -753,7 +798,8 @@ def run():
                         )
                     fig_custom.update_layout(title=f"{titre} (simulation 3D)")
 
-                st.plotly_chart(fig_custom, use_container_width=True)
+                if fig_custom is not None:
+                    st.plotly_chart(fig_custom, use_container_width=True)
 
     # === Étape 7 : Export CSV ===
     st.header("⬇️ Étape 7 : Export des résultats")
