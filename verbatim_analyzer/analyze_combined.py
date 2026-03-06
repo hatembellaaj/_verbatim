@@ -615,17 +615,11 @@ def run():
         if not options_analyse:
             st.info("Aucun cluster/sous-cluster disponible pour le croisement statistique.")
         else:
-            col_a, col_b, col_c = st.columns(3)
+            col_a, col_b = st.columns(2)
             with col_a:
                 colonne_stat = st.selectbox("Colonne Excel d'origine à analyser", colonnes_excel, key="custom_stat_col")
             with col_b:
                 cible_cluster = st.selectbox("Cluster / Sous-cluster", options_analyse, key="custom_stat_cluster")
-            with col_c:
-                type_graphe = st.selectbox(
-                    "Type de graphique 3D",
-                    ["Histogramme 3D", "Courbe 3D", "Camembert 3D", "Vague 3D (notes 1-5)"],
-                    key="custom_stat_graph",
-                )
 
             if cible_cluster.startswith("Sous-cluster : "):
                 sous_cluster_col = cible_cluster.replace("Sous-cluster : ", "", 1)
@@ -649,7 +643,8 @@ def run():
                     "La colonne sélectionnée du fichier d'origine n'est pas disponible après alignement des données."
                 )
             else:
-                stats_custom = (
+                # Tableau 1 (2D) : moyenne de note par valeur de la colonne d'origine
+                table_2d = (
                     data_filtre.assign(_col=data_filtre[colonne_stat].fillna("Inconnu").astype(str))
                     .groupby("_col")
                     .agg(
@@ -657,163 +652,80 @@ def run():
                         Note_moyenne=(note_col, lambda s: pd.to_numeric(s, errors="coerce").mean()),
                     )
                     .reset_index()
-                    .rename(columns={"_col": colonne_stat})
+                    .rename(columns={"_col": colonne_stat, "Note_moyenne": "Note moyenne"})
                 )
-                stats_custom["Note moyenne"] = stats_custom["Note_moyenne"].round(2)
-                stats_custom = stats_custom.drop(columns=["Note_moyenne"])
+                table_2d["Note moyenne"] = table_2d["Note moyenne"].round(2)
 
-                # Tri naturel des notes 1,2,3... quand la colonne est numérique
-                valeurs_num = pd.to_numeric(stats_custom[colonne_stat], errors="coerce")
+                valeurs_num = pd.to_numeric(table_2d[colonne_stat], errors="coerce")
                 if valeurs_num.notna().all():
-                    stats_custom = stats_custom.assign(_num=valeurs_num).sort_values("_num").drop(columns=["_num"])
+                    table_2d = table_2d.assign(_num=valeurs_num).sort_values("_num").drop(columns=["_num"])
                 else:
-                    stats_custom = stats_custom.sort_values("Occurrences", ascending=False)
+                    table_2d = table_2d.sort_values("Occurrences", ascending=False)
 
-                st.dataframe(stats_custom, use_container_width=True)
+                st.markdown("#### Tableau 1 — Vue 2D (moyenne de note)")
+                st.dataframe(table_2d, use_container_width=True)
 
-                mesure_graph = st.selectbox(
-                    "Mesure à représenter",
-                    ["Occurrences", "Note moyenne"],
-                    index=1,
-                    key="custom_stat_measure",
-                    help="Choisissez si le graphe doit afficher le volume ou la moyenne de notes.",
+                fig_2d = px.line(
+                    table_2d,
+                    x=colonne_stat,
+                    y="Note moyenne",
+                    markers=True,
+                    title=f"Note moyenne par '{colonne_stat}' pour '{titre_cible}'",
                 )
+                st.plotly_chart(fig_2d, use_container_width=True)
 
-                labels = stats_custom[colonne_stat].tolist()
-                values = stats_custom[mesure_graph].fillna(0).tolist()
-                x_pos = np.arange(len(labels))
+                # Tableau 2 (3D) : note exacte + fréquence par valeur de la colonne d'origine
+                notes_exactes = data_filtre[[colonne_stat, note_col]].copy()
+                notes_exactes[colonne_stat] = notes_exactes[colonne_stat].fillna("Inconnu").astype(str)
+                notes_exactes[note_col] = pd.to_numeric(notes_exactes[note_col], errors="coerce")
+                notes_exactes = notes_exactes.dropna(subset=[note_col])
 
-                titre = f"{type_graphe} de '{colonne_stat}' pour '{titre_cible}' ({mesure_graph})"
-                fig_custom = None
-
-                if type_graphe == "Vague 3D (notes 1-5)":
-                    notes_df = data_filtre[[colonne_stat, note_col]].copy()
-                    notes_df[note_col] = pd.to_numeric(notes_df[note_col], errors="coerce")
-                    notes_df = notes_df.dropna(subset=[colonne_stat, note_col])
-                    notes_df["Note arrondie"] = notes_df[note_col].round().clip(1, 5).astype(int)
-
-                    if notes_df.empty:
-                        st.warning("Impossible de construire la vague 3D : aucune note numérique exploitable.")
-                    else:
-                        pivot = (
-                            notes_df.groupby([colonne_stat, "Note arrondie"])[note_col]
-                            .mean()
-                            .unstack("Note arrondie")
-                            .reindex(columns=[1, 2, 3, 4, 5])
-                        )
-
-                        regions = pivot.index.tolist()
-                        fig_custom = go.Figure()
-                        for region_idx, region in enumerate(regions):
-                            z_vals = [None if pd.isna(v) else float(v) for v in pivot.loc[region].tolist()]
-                            fig_custom.add_trace(
-                                go.Scatter3d(
-                                    x=[1, 2, 3, 4, 5],
-                                    y=[region_idx] * 5,
-                                    z=z_vals,
-                                    mode="lines+markers",
-                                    name=str(region),
-                                    line=dict(width=5),
-                                    marker=dict(size=5),
-                                    connectgaps=False,
-                                )
-                            )
-
-                        fig_custom.update_layout(
-                            title=(
-                                f"Vague 3D des notes moyennes par '{colonne_stat}' "
-                                f"pour '{titre_cible}' (vides = absence de données)"
-                            ),
-                            scene=dict(
-                                xaxis=dict(title="Note (1 à 5)", tickvals=[1, 2, 3, 4, 5]),
-                                yaxis=dict(title=colonne_stat, tickvals=list(range(len(regions))), ticktext=[str(r) for r in regions]),
-                                zaxis=dict(title="Note moyenne"),
-                            ),
-                        )
-                elif type_graphe == "Histogramme 3D":
-                    xs, ys, zs = [], [], []
-                    for i, val in enumerate(values):
-                        xs.extend([i, i, None])
-                        ys.extend([0, 0, None])
-                        zs.extend([0, val, None])
-
-                    fig_custom = go.Figure()
-                    fig_custom.add_trace(
-                        go.Scatter3d(
-                            x=xs,
-                            y=ys,
-                            z=zs,
-                            mode="lines",
-                            line=dict(width=8, color="#1f77b4"),
-                            showlegend=False,
-                        )
+                if notes_exactes.empty:
+                    st.warning("Impossible de construire la vue 3D : aucune note numérique exploitable.")
+                else:
+                    table_3d = (
+                        notes_exactes.groupby([colonne_stat, note_col])
+                        .size()
+                        .reset_index(name="Occurrences")
+                        .rename(columns={note_col: "Note exacte"})
+                        .sort_values([colonne_stat, "Note exacte"])
                     )
-                    fig_custom.add_trace(
-                        go.Scatter3d(
-                            x=x_pos,
-                            y=[0] * len(x_pos),
-                            z=values,
-                            mode="markers+text",
-                            text=[str(v) for v in values],
-                            textposition="top center",
-                            marker=dict(size=6, color=values, colorscale="Viridis"),
-                            showlegend=False,
-                        )
-                    )
-                    fig_custom.update_layout(
-                        title=titre,
-                        scene=dict(
-                            xaxis=dict(title=colonne_stat, tickmode="array", tickvals=x_pos.tolist(), ticktext=labels),
-                            yaxis=dict(title="Cluster", tickvals=[0], ticktext=[titre_cible]),
-                            zaxis=dict(title=mesure_graph),
-                        ),
-                    )
-                elif type_graphe == "Courbe 3D":
-                    fig_custom = go.Figure(
+
+                    st.markdown("#### Tableau 2 — Vue 3D (note exacte)")
+                    st.dataframe(table_3d, use_container_width=True)
+
+                    x_labels = table_3d[colonne_stat].astype(str).unique().tolist()
+                    x_map = {label: idx for idx, label in enumerate(x_labels)}
+                    x_vals = table_3d[colonne_stat].map(x_map)
+
+                    fig_3d = go.Figure(
                         data=[
                             go.Scatter3d(
-                                x=x_pos,
-                                y=[0] * len(x_pos),
-                                z=values,
-                                mode="lines+markers+text",
-                                text=[str(v) for v in values],
+                                x=x_vals,
+                                y=table_3d["Note exacte"],
+                                z=table_3d["Occurrences"],
+                                mode="markers+text",
+                                text=table_3d["Occurrences"].astype(str),
                                 textposition="top center",
-                                line=dict(color="#ff7f0e", width=6),
-                                marker=dict(size=5, color=values, colorscale="Plasma"),
+                                marker=dict(
+                                    size=6,
+                                    color=table_3d["Occurrences"],
+                                    colorscale="Viridis",
+                                    opacity=0.9,
+                                ),
                                 showlegend=False,
                             )
                         ]
                     )
-                    fig_custom.update_layout(
-                        title=titre,
+                    fig_3d.update_layout(
+                        title=f"Vue 3D des notes exactes par '{colonne_stat}' pour '{titre_cible}'",
                         scene=dict(
-                            xaxis=dict(title=colonne_stat, tickmode="array", tickvals=x_pos.tolist(), ticktext=labels),
-                            yaxis=dict(title="Cluster", tickvals=[0], ticktext=[titre_cible]),
-                            zaxis=dict(title=mesure_graph),
+                            xaxis=dict(title=colonne_stat, tickmode="array", tickvals=list(x_map.values()), ticktext=x_labels),
+                            yaxis=dict(title="Note exacte"),
+                            zaxis=dict(title="Occurrences"),
                         ),
                     )
-                else:
-                    # Plotly ne propose pas de camembert 3D natif : simulation 3D par empilement
-                    fig_custom = go.Figure()
-                    depth = 10
-                    for i in range(depth):
-                        fig_custom.add_trace(
-                            go.Pie(
-                                labels=labels,
-                                values=values,
-                                hole=0.35,
-                                sort=False,
-                                direction="clockwise",
-                                textinfo="none" if i < depth - 1 else "label+percent",
-                                marker=dict(line=dict(color="rgba(0,0,0,0.15)", width=1)),
-                                domain={"x": [0.05, 0.95], "y": [0.05 + i * 0.003, 0.95 + i * 0.003]},
-                                showlegend=i == depth - 1,
-                            )
-                        )
-                    fig_custom.update_layout(title=f"{titre} (simulation 3D)")
-
-                if fig_custom is not None:
-                    st.plotly_chart(fig_custom, use_container_width=True)
+                    st.plotly_chart(fig_3d, use_container_width=True)
 
     # === Étape 7 : Export CSV ===
     st.header("⬇️ Étape 7 : Export des résultats")
