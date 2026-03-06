@@ -41,6 +41,9 @@ def render_manual() -> None:
           - « Verbatim public » (obligatoire) pour le texte principal analysé.
           - « Verbatim privé » (optionnelle) pour un complément qui sera concaténé automatiquement au verbatim public.
           - « Note globale avis 1 » (obligatoire uniquement en mode Marketing) pour les statistiques liées à la note client.
+          - « Zone ou région » (optionnelle) pour segmenter vos analyses géographiques.
+          - « Sexe » (optionnelle) ; si la valeur est absente, l'application peut la compléter via « Prénom » lorsqu'un rapprochement est possible.
+          - « Prénom » (optionnelle) utilisée pour inférer le sexe si besoin, via un dictionnaire interne de prénoms (ex. `Isabelle` ⇒ `Femme`).
           - Les colonnes calculées par l'application (**Verbatim complet**, **Note IA**, incohérences détectées) sont générées automatiquement : vous n'avez rien à ajouter dans votre CSV pour ces champs.
         - **Choisir le mode d'analyse** :
           - *Analyse Marketing* pour travailler sur la note client.

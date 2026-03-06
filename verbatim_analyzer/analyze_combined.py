@@ -2,8 +2,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+import numpy as np
 import re
 import utils
+from utils import enrichir_colonnes_demographiques
 from column_mapper import load_csv_with_mapping
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
@@ -48,18 +51,46 @@ def run():
         st.info("En attente d’un fichier CSV…")
         st.stop()
 
+    # Lecture complète du fichier d'origine pour garder toutes les colonnes Excel
+    try:
+        uploaded_file.seek(0)
+        df_original = pd.read_csv(
+            uploaded_file,
+            sep=None,
+            engine="python",
+            on_bad_lines="skip",
+        )
+    except Exception as e:
+        st.error(f"Erreur de lecture du fichier d'origine : {e}")
+        st.stop()
+
     df = load_csv_with_mapping(
         uploaded_file,
         required_fields=["Verbatim public"],
-        optional_fields=["Verbatim privé", "Note globale avis 1"],
+        optional_fields=["Verbatim privé", "Note globale avis 1", "Zone ou région", "Sexe", "Prénom"],
         key_prefix="combined",
     )
 
     st.success(f"✅ {len(df)} lignes chargées après mapping des colonnes")
 
+    if len(df_original) != len(df):
+        st.warning(
+            "⚠️ Le nombre de lignes du fichier d'origine diffère après mapping ; "
+            "les colonnes d'origine seront alignées sur les lignes conservées."
+        )
+
+    # Réinjecte les colonnes du fichier d'origine pour les analyses statistiques personnalisées
+    for col in df_original.columns:
+        if col not in df.columns:
+            df[col] = df_original[col].iloc[: len(df)].values
+
     if "Verbatim public" not in df.columns:
         st.error("❌ Merci d'associer une colonne au champ obligatoire 'Verbatim public'.")
         st.stop()
+
+    df, lignes_sexe_inferrees = enrichir_colonnes_demographiques(df)
+    if "Sexe" in df.columns:
+        st.caption(f"Sexe normalisé. {lignes_sexe_inferrees} ligne(s) complétée(s) via la colonne Prénom.")
 
     private_series = df["Verbatim privé"] if "Verbatim privé" in df.columns else pd.Series([""] * len(df), index=df.index)
     df["Verbatim complet"] = df["Verbatim public"].fillna("") + " " + private_series.fillna("")
@@ -569,6 +600,132 @@ def run():
         st.dataframe(
             df_enriched[["Verbatim public", "Profil inféré", "Confiance profil", "Justification profil"]].head(200)
         )
+
+    # === Étape 6 quater : Graphiques statistiques personnalisés ===
+    st.header("🧮 Étape 6 quater : Graphique statistique personnalisé (3D)")
+
+    colonnes_excel = list(df_original.columns)
+    if not colonnes_excel:
+        st.info("Aucune colonne exploitable détectée dans le fichier d'origine.")
+    else:
+        options_clusters = [f"Cluster : {t.get('theme', '')}" for t in themes_utilises if t.get('theme')]
+        options_sous_clusters = [f"Sous-cluster : {c}" for c in subtheme_cols]
+        options_analyse = options_clusters + options_sous_clusters
+
+        if not options_analyse:
+            st.info("Aucun cluster/sous-cluster disponible pour le croisement statistique.")
+        else:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                colonne_stat = st.selectbox("Colonne Excel d'origine à analyser", colonnes_excel, key="custom_stat_col")
+            with col_b:
+                cible_cluster = st.selectbox("Cluster / Sous-cluster", options_analyse, key="custom_stat_cluster")
+
+            if cible_cluster.startswith("Sous-cluster : "):
+                sous_cluster_col = cible_cluster.replace("Sous-cluster : ", "", 1)
+                masque = df_enriched[sous_cluster_col].notna()
+                titre_cible = sous_cluster_col
+            else:
+                theme_name = cible_cluster.replace("Cluster : ", "", 1)
+                sous_cols_theme = [c for c in subtheme_cols if c.startswith(f"{theme_name}::")]
+                masque = (
+                    df_enriched[sous_cols_theme].notna().any(axis=1)
+                    if sous_cols_theme
+                    else pd.Series([False] * len(df_enriched), index=df_enriched.index)
+                )
+                titre_cible = theme_name
+
+            data_filtre = df_enriched.loc[masque].copy()
+            if data_filtre.empty:
+                st.warning("Aucune donnée disponible pour cette sélection cluster/sous-cluster.")
+            elif colonne_stat not in data_filtre.columns:
+                st.error(
+                    "La colonne sélectionnée du fichier d'origine n'est pas disponible après alignement des données."
+                )
+            else:
+                # Tableau 1 (2D) : moyenne de note par valeur de la colonne d'origine
+                table_2d = (
+                    data_filtre.assign(_col=data_filtre[colonne_stat].fillna("Inconnu").astype(str))
+                    .groupby("_col")
+                    .agg(
+                        Occurrences=(colonne_stat, "size"),
+                        Note_moyenne=(note_col, lambda s: pd.to_numeric(s, errors="coerce").mean()),
+                    )
+                    .reset_index()
+                    .rename(columns={"_col": colonne_stat, "Note_moyenne": "Note moyenne"})
+                )
+                table_2d["Note moyenne"] = table_2d["Note moyenne"].round(2)
+
+                valeurs_num = pd.to_numeric(table_2d[colonne_stat], errors="coerce")
+                if valeurs_num.notna().all():
+                    table_2d = table_2d.assign(_num=valeurs_num).sort_values("_num").drop(columns=["_num"])
+                else:
+                    table_2d = table_2d.sort_values("Occurrences", ascending=False)
+
+                st.markdown("#### Tableau 1 — Vue 2D (moyenne de note)")
+                st.dataframe(table_2d, use_container_width=True)
+
+                fig_2d = px.line(
+                    table_2d,
+                    x=colonne_stat,
+                    y="Note moyenne",
+                    markers=True,
+                    title=f"Note moyenne par '{colonne_stat}' pour '{titre_cible}'",
+                )
+                st.plotly_chart(fig_2d, use_container_width=True)
+
+                # Tableau 2 (3D) : note exacte + fréquence par valeur de la colonne d'origine
+                notes_exactes = data_filtre[[colonne_stat, note_col]].copy()
+                notes_exactes[colonne_stat] = notes_exactes[colonne_stat].fillna("Inconnu").astype(str)
+                notes_exactes[note_col] = pd.to_numeric(notes_exactes[note_col], errors="coerce")
+                notes_exactes = notes_exactes.dropna(subset=[note_col])
+
+                if notes_exactes.empty:
+                    st.warning("Impossible de construire la vue 3D : aucune note numérique exploitable.")
+                else:
+                    table_3d = (
+                        notes_exactes.groupby([colonne_stat, note_col])
+                        .size()
+                        .reset_index(name="Occurrences")
+                        .rename(columns={note_col: "Note exacte"})
+                        .sort_values([colonne_stat, "Note exacte"])
+                    )
+
+                    st.markdown("#### Tableau 2 — Vue 3D (note exacte)")
+                    st.dataframe(table_3d, use_container_width=True)
+
+                    x_labels = table_3d[colonne_stat].astype(str).unique().tolist()
+                    x_map = {label: idx for idx, label in enumerate(x_labels)}
+                    x_vals = table_3d[colonne_stat].map(x_map)
+
+                    fig_3d = go.Figure(
+                        data=[
+                            go.Scatter3d(
+                                x=x_vals,
+                                y=table_3d["Note exacte"],
+                                z=table_3d["Occurrences"],
+                                mode="markers+text",
+                                text=table_3d["Occurrences"].astype(str),
+                                textposition="top center",
+                                marker=dict(
+                                    size=6,
+                                    color=table_3d["Occurrences"],
+                                    colorscale="Viridis",
+                                    opacity=0.9,
+                                ),
+                                showlegend=False,
+                            )
+                        ]
+                    )
+                    fig_3d.update_layout(
+                        title=f"Vue 3D des notes exactes par '{colonne_stat}' pour '{titre_cible}'",
+                        scene=dict(
+                            xaxis=dict(title=colonne_stat, tickmode="array", tickvals=list(x_map.values()), ticktext=x_labels),
+                            yaxis=dict(title="Note exacte"),
+                            zaxis=dict(title="Occurrences"),
+                        ),
+                    )
+                    st.plotly_chart(fig_3d, use_container_width=True)
 
     # === Étape 7 : Export CSV ===
     st.header("⬇️ Étape 7 : Export des résultats")
