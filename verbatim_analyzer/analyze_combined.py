@@ -11,6 +11,7 @@ from column_mapper import load_csv_with_mapping
 from sidebar_options import get_sidebar_options
 from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
+from verbatim_analyzer.sql_chat import generate_sql_from_question, run_sql_on_dataframe
 from streamlit_tree_select import tree_select
 from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector, compute_usage_cost
 
@@ -726,6 +727,54 @@ def run():
                         ),
                     )
                     st.plotly_chart(fig_3d, use_container_width=True)
+
+    # === Étape 6 quinquies : Chat SQL sur fichier enrichi ===
+    st.header("💬 Étape 6 quinquies : Chat SQL sur le fichier enrichi")
+    st.caption(
+        "Posez une question en langage naturel. L'application envoie le nom des colonnes "
+        "(dont sous-thèmes et note), récupère une requête SQL OpenAI, puis l'exécute sur le CSV enrichi."
+    )
+
+    colonnes_contexte = [c for c in df_enriched.columns if c != "Verbatim complet"]
+    st.code(", ".join(colonnes_contexte), language="text")
+
+    question_sql = st.text_area(
+        "Votre question",
+        placeholder="Exemple : Donne les 10 sous-thèmes avec la meilleure note moyenne",
+        key="chat_sql_question",
+    )
+
+    if st.button("🚀 Générer et exécuter la requête SQL", key="run_sql_chat"):
+        if not question_sql.strip():
+            st.warning("Veuillez saisir une question avant de lancer la génération SQL.")
+        else:
+            with st.spinner("Génération de la requête SQL et exécution..."):
+                try:
+                    sql_query = generate_sql_from_question(
+                        question=question_sql,
+                        available_columns=colonnes_contexte,
+                        model=options.get("llm_model", "gpt-4.1-mini"),
+                    )
+                    resultat_sql, sql_query = run_sql_on_dataframe(df_enriched, sql_query)
+                    st.session_state["chat_sql_query"] = sql_query
+                    st.session_state["chat_sql_result"] = resultat_sql
+                except Exception as e:
+                    st.error(f"Erreur pendant la génération ou l'exécution SQL : {e}")
+
+    if st.session_state.get("chat_sql_query"):
+        st.markdown("#### Requête SQL générée")
+        st.code(st.session_state["chat_sql_query"], language="sql")
+
+    if "chat_sql_result" in st.session_state:
+        st.markdown("#### Résultat")
+        st.dataframe(st.session_state["chat_sql_result"], use_container_width=True)
+        csv_sql = utils.preparer_csv_export(st.session_state["chat_sql_result"], "resultat_chat_sql.csv")
+        st.download_button(
+            "⬇️ Télécharger le résultat SQL",
+            data=csv_sql,
+            file_name="resultat_chat_sql.csv",
+            mime="text/csv",
+        )
 
     # === Étape 7 : Export CSV ===
     st.header("⬇️ Étape 7 : Export des résultats")
