@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import re
+import logging
 import utils
 from utils import enrichir_colonnes_demographiques
 from column_mapper import load_csv_with_mapping
@@ -15,6 +16,8 @@ from verbatim_analyzer.sql_chat import generate_sql_from_question, run_sql_on_da
 from streamlit_tree_select import tree_select
 from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector, compute_usage_cost
 
+
+logger = logging.getLogger(__name__)
 
 PROFILE_PATTERNS = [
     ("Couple", [r"\bavec ma femme\b", r"\bavec mon mari\b", r"\ben couple\b"]),
@@ -738,18 +741,21 @@ def run():
     colonnes_contexte = [c for c in df_enriched.columns if c != "Verbatim complet"]
     st.code(", ".join(colonnes_contexte), language="text")
 
-    question_sql = st.text_area(
-        "Votre question",
-        placeholder="Exemple : Donne les 10 sous-thèmes avec la meilleure note moyenne",
-        key="chat_sql_question",
-    )
+    with st.form("chat_sql_form", clear_on_submit=False):
+        question_sql = st.text_area(
+            "Votre question",
+            placeholder="Exemple : Donne les 10 sous-thèmes avec la meilleure note moyenne",
+            key="chat_sql_question",
+        )
+        run_sql_chat = st.form_submit_button("🚀 Générer et exécuter la requête SQL")
 
-    if st.button("🚀 Générer et exécuter la requête SQL", key="run_sql_chat"):
+    if run_sql_chat:
         if not question_sql.strip():
             st.warning("Veuillez saisir une question avant de lancer la génération SQL.")
         else:
             with st.spinner("Génération de la requête SQL et exécution..."):
                 try:
+                    logger.info("[chat-sql] Soumission utilisateur reçue")
                     sql_query = generate_sql_from_question(
                         question=question_sql,
                         available_columns=colonnes_contexte,
@@ -759,6 +765,7 @@ def run():
                     st.session_state["chat_sql_query"] = sql_query
                     st.session_state["chat_sql_result"] = resultat_sql
                 except Exception as e:
+                    logger.exception("[chat-sql] Erreur durant génération/exécution SQL")
                     st.error(f"Erreur pendant la génération ou l'exécution SQL : {e}")
 
     if st.session_state.get("chat_sql_query"):

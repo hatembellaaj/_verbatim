@@ -1,11 +1,20 @@
+import logging
 import streamlit as st
 import marketing
 import ia_rating  # nouveau nom du module
 import analyze_combined
 import manual
 import auth
+import os
+
+logging.basicConfig(
+    level=os.getenv("APP_LOG_LEVEL", "INFO"),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(layout="wide")
+logger.info("Application Streamlit initialisée")
 
 user = auth.require_authentication()
 
