@@ -6,6 +6,8 @@ import plotly.graph_objects as go
 import numpy as np
 import re
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
 import utils
 from utils import enrichir_colonnes_demographiques
 from column_mapper import load_csv_with_mapping
@@ -14,7 +16,12 @@ from report_utils import generer_et_afficher_rapport
 from verbatim_analyzer.marketing_analyzer import extract_marketing_clusters_with_openai, associer_sous_themes_par_similarity
 from verbatim_analyzer.sql_chat import generate_sql_from_question, run_sql_on_dataframe
 from streamlit_tree_select import tree_select
-from verbatim_analyzer.pricing import estimate_average_chars, render_llm_selector, compute_usage_cost
+from verbatim_analyzer.pricing import (
+    estimate_average_chars,
+    render_llm_selector,
+    compute_usage_cost,
+    compute_sampling_estimates,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +46,40 @@ def infer_profile_from_verbatim(text: str):
                 return profile, 0.85, f"Indice détecté: `{pattern}`"
 
     return "Inconnu", 0.2, "Aucun pattern détecté"
+
+
+def parallel_ia_rating(texts: pd.Series) -> pd.Series:
+    """Calcule les notes IA en parallèle pour grands volumes de verbatims."""
+
+    as_list = texts.astype(str).tolist()
+    if not as_list:
+        return pd.Series(dtype="float64")
+
+    max_workers = min(16, len(as_list), max((os.cpu_count() or 4), 4))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        scores = list(executor.map(utils.calculer_note_ia, as_list))
+    return pd.Series(scores, index=texts.index)
+
+
+def estimate_incoherence_llm_costs(
+    review_count: int,
+    avg_chars_per_verbatim: int,
+    input_cost_per_1k: float,
+    output_cost_per_1k: float,
+) -> dict:
+    """Estimation approximative du coût de détection d'incohérences via LLM."""
+
+    tokens_in = max(review_count * (avg_chars_per_verbatim / 4), 0)
+    tokens_out = max(review_count * 60, 0)  # approx: décision courte par verbatim
+    input_cost = (tokens_in / 1000) * float(input_cost_per_1k or 0.0)
+    output_cost = (tokens_out / 1000) * float(output_cost_per_1k or 0.0)
+    return {
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "total": input_cost + output_cost,
+        "input": input_cost,
+        "output": output_cost,
+    }
 
 def run():
     st.title("🧩 Analyse complète des verbatims")
@@ -156,11 +197,19 @@ def run():
             disabled=not use_openai,
             help="Sélectionnez combien de verbatims seront tirés aléatoirement pour générer les thèmes.",
         )
+    sampling_estimates = compute_sampling_estimates(
+        sample_size=sample_size,
+        avg_chars_per_verbatim=avg_chars_per_verbatim,
+        input_cost_override=options.get("llm_input_cost"),
+    )
     with sample_col2:
         st.metric(
             "Coût estimé entrée",
-            f"${options['estimated_openai_cost']:.4f}",
-            help="Basé sur la longueur moyenne observée et le pricing OpenAI sélectionné",
+            f"${sampling_estimates['estimated_cost']:.4f}",
+            help=(
+                "Ajusté selon l'échantillon sélectionné. "
+                "Estimation basée sur la longueur moyenne observée et le pricing OpenAI sélectionné"
+            ),
         )
 
     options["cluster_sample_size"] = sample_size
@@ -365,10 +414,32 @@ def run():
         return data
 
     tree_data = convertir_en_tree_data(themes)
+    all_node_values = [t.get("theme", "") for t in themes]
+    for t in themes:
+        theme_name = t.get("theme", "")
+        for s in t.get("subthemes", []):
+            label = s.get("label") if isinstance(s, dict) else s
+            if theme_name and label:
+                all_node_values.append(f"{theme_name}::{label}")
+
+    default_checked = st.session_state.get("selected_clusters", [])
+
+    select_col1, select_col2 = st.columns(2)
+    with select_col1:
+        if st.button("✅ Tout sélectionner (thèmes + sous-thèmes)"):
+            st.session_state["selected_clusters"] = all_node_values
+            default_checked = all_node_values
+            st.rerun()
+    with select_col2:
+        if st.button("🧹 Réinitialiser la sélection"):
+            st.session_state["selected_clusters"] = []
+            default_checked = []
+            st.rerun()
 
     selected_nodes = tree_select(
         tree_data,
         "Sélectionnez les thèmes et sous-thèmes à retenir",
+        checked=default_checked,
         key="cluster_tree"
     )
 
@@ -423,7 +494,8 @@ def run():
     st.header("💬 Étape 4 : Calcul des notes")
     if mode.startswith("Analyse IA"):
         st.info("Les notes sont générées automatiquement par IA (1 à 5)")
-        df["Note IA"] = df["Verbatim public"].astype(str).apply(utils.calculer_note_ia)
+        st.caption("Traitement parallèle activé pour accélérer les grands volumes.")
+        df["Note IA"] = parallel_ia_rating(df["Verbatim public"])
         note_col = "Note IA"
     else:
         if "Note globale avis 1" not in df.columns:
@@ -474,7 +546,31 @@ def run():
     # === Étape 6 bis : Vérification des incohérences ===
     st.header("🧩 Étape 6 bis : Vérification des incohérences sémantiques")
 
-    if st.toggle("Activer la détection des incohérences", value=False):
+    incoherence_notice_ack = st.checkbox(
+        "J'ai compris que la détection des incohérences peut générer un coût important en tokens.",
+        value=False,
+    )
+
+    if incoherence_notice_ack:
+        st.warning(
+            "⚠️ Cette étape peut être coûteuse sur de très gros fichiers. "
+            "Les montants ci-dessous sont approximatifs et dépendent du prompt final, du modèle et du volume."
+        )
+        inco_llm_model, inco_in_cost, inco_out_cost = render_llm_selector("Incohérences")
+        inco_costs = estimate_incoherence_llm_costs(
+            review_count=len(df_enriched),
+            avg_chars_per_verbatim=avg_chars_per_verbatim,
+            input_cost_per_1k=inco_in_cost,
+            output_cost_per_1k=inco_out_cost,
+        )
+        st.info(
+            f"Modèle sélectionné : **{inco_llm_model}** · "
+            f"Coût approximatif total: **${inco_costs['total']:.4f}** "
+            f"(in: ${inco_costs['input']:.4f}, out: ${inco_costs['output']:.4f}) "
+            f"pour ~{len(df_enriched):,} avis."
+        )
+
+    if st.toggle("Activer la détection des incohérences", value=False, disabled=not incoherence_notice_ack):
         with st.spinner("🔍 Vérification des incohérences en cours..."):
             incoherences = utils.verifier_coherence_semantique(
                 df_enriched, subtheme_cols, seuil=0.3, alpha=0.7
@@ -518,28 +614,54 @@ def run():
 
     # === Étape 6 : Visualisations ===
     st.header("📊 Étape 6 : Visualisation des résultats")
+    st.caption("Pré-calcul parallèle des agrégats pour améliorer les performances sur gros volumes.")
+
+    def _build_stats() -> pd.DataFrame:
+        return (
+            df_enriched[[note_col] + subtheme_cols]
+            .melt(id_vars=note_col, var_name="Sous-thème", value_name="Assoc")
+            .dropna()
+            .groupby("Sous-thème")[note_col]
+            .agg(["count", "mean"])
+            .sort_values("mean", ascending=False)
+        )
+
+    def _build_counts() -> pd.DataFrame:
+        local_counts = df_enriched[subtheme_cols].notna().sum().reset_index()
+        local_counts.columns = ["Sous-thème", "Occurrences"]
+        return local_counts
+
+    def _build_examples() -> dict:
+        return {
+            col: df_enriched[df_enriched[col].notna()].head(3)
+            for col in subtheme_cols[:5]
+        }
+
+    with ThreadPoolExecutor(max_workers=3) as viz_executor:
+        stats_future = viz_executor.submit(_build_stats)
+        counts_future = viz_executor.submit(_build_counts)
+        examples_future = viz_executor.submit(_build_examples)
+        stats = stats_future.result()
+        counts = counts_future.result()
+        example_subsets = examples_future.result()
+
     tabs = st.tabs(["📈 Statistiques", "💬 Verbatims", "🥧 Répartition", "🧾 Rapport"])
 
     with tabs[0]:
         st.subheader("Moyenne des notes par sous-thème")
-        df_melted = df_enriched[[note_col] + subtheme_cols].melt(id_vars=note_col, var_name="Sous-thème", value_name="Assoc").dropna()
-        stats = df_melted.groupby("Sous-thème")[note_col].agg(["count", "mean"]).sort_values("mean", ascending=False)
         st.dataframe(stats)
         fig = px.bar(stats, x=stats.index, y="mean", title="Moyenne des notes par sous-thème")
         st.plotly_chart(fig, use_container_width=True)
 
     with tabs[1]:
         st.subheader("Exemples de verbatims")
-        for col in subtheme_cols[:5]:
-            subset = df_enriched[df_enriched[col].notna()].head(3)
+        for col, subset in example_subsets.items():
             st.markdown(f"**{col}**")
             for _, row in subset.iterrows():
                 st.markdown(f"- {row['Verbatim public']} ({note_col}: {row[note_col]})")
 
     with tabs[2]:
         st.subheader("Répartition des sous-thèmes")
-        counts = df_enriched[subtheme_cols].notna().sum().reset_index()
-        counts.columns = ["Sous-thème", "Occurrences"]
         fig_pie = px.pie(counts, names="Sous-thème", values="Occurrences", title="Répartition des verbatims par sous-thème")
         st.plotly_chart(fig_pie, use_container_width=True)
 
