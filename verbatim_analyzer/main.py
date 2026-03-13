@@ -11,6 +11,10 @@ logging.basicConfig(
     level=os.getenv("APP_LOG_LEVEL", "INFO"),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
+# streamlit-tree-select references a missing source map file (bootstrap.min.css.map)
+# in its packaged frontend assets. Streamlit logs this as an internal component
+# request traceback even though the app continues to work normally.
+logging.getLogger("streamlit.web.server.component_request_handler").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(layout="wide")
